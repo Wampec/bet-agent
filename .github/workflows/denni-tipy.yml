@@ -1,0 +1,82 @@
+# Denni tipy -- beh agenta na serverech GitHubu, bez zapnuteho pocitace.
+#
+# Kdy se spousti:
+#   GitHub pocita cas v UTC a nezna letni cas. Proto jsou tu tri spousteni:
+#     06:05 UTC = 08:05 v lete (SELC), 07:05 v zime (SEC)
+#     07:05 UTC = 09:05 v lete,        08:05 v zime
+#     08:05 UTC = 10:05 v lete,        09:05 v zime  (zaloha)
+#   Agent sam pozna, ze je pred 8:00 prazskeho casu nebo ze uz dnes zpravu
+#   poslal, a skonci drive, nez sahne na API -- preskoceny beh nestoji kredity.
+#   GitHub planovane behy obcas o nekolik minut i desitek minut zpozdi, nebo
+#   ve spicce jeden vynecha; dalsi spusteni to pak dozene.
+#
+# Rucni spusteni: zalozka Actions -> Denni tipy -> Run workflow.
+#   "Poslat i kdyz uz dnes zprava byla" = zapnout pro test.
+
+name: Denni tipy
+
+on:
+  schedule:
+    - cron: "5 6 * * *"
+    - cron: "5 7 * * *"
+    - cron: "5 8 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Poslat i kdyz uz dnes zprava byla (pro test)"
+        type: boolean
+        default: false
+
+# Workflow si po behu zapisuje denik tipu (tips.json) zpet do repozitare.
+permissions:
+  contents: write
+
+# Nikdy dva behy najednou -- jinak by si prepisovaly denik.
+concurrency:
+  group: denni-tipy
+  cancel-in-progress: false
+
+jobs:
+  tipy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Stahnout kod a denik tipu
+        uses: actions/checkout@v5
+
+      - name: Pripravit Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Nainstalovat knihovny
+        run: pip install -r requirements.txt
+
+      - name: Spustit agenta
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          if [ "$FORCE" = "true" ]; then
+            python main.py
+          else
+            python main.py --once-per-day --not-before 08:00
+          fi
+
+      - name: Ulozit denik tipu do repozitare
+        run: |
+          if git diff --quiet -- tips.json; then
+            echo "Denik tipu se nezmenil."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tips.json
+          git commit -m "Denik tipu $(TZ=Europe/Prague date +%Y-%m-%d)"
+          # Kdyby mezitim nekdo upravil treba settings.env na webu.
+          git pull --rebase
+          git push

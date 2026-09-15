@@ -1,0 +1,22 @@
+# Tajne klice -- nikdy do repozitare
+.env
+.env.bak
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Logy a docasne soubory
+*.log
+agent.log*
+.tmp.driveupload/
+
+# Testovaci soubory a stary stav z drivejsi verze agenta
+tips.*.json
+state.json
+state.*.json
+
+# POZOR: tips.json (denik tipu) v repozitari BYT MUSI -- GitHub Actions
+# si do nej po kazdem behu zapisuje historii a statistiky pasem.
