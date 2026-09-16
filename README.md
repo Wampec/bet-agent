@@ -220,13 +220,16 @@ přegenerován v BotFather). Aktuální najdeš v `/mybots → bot → API Token
 Agent běží na serverech GitHubu podle `.github/workflows/denni-tipy.yml`.
 Počítač nemusí být zapnutý.
 
-- **Kdy:** každý den zpráva přijde krátce po 8:00 pražského času (GitHub
-  plánované běhy obvykle o pár minut zpozdí, výjimečně i o desítky minut).
-  GitHub neumí letní čas, proto se agent spouští třikrát (6:05, 7:05 a 8:05 UTC)
-  a sám hlídá, aby zpráva přišla **jednou denně a ne před 8:00**. Běhy navíc
-  skončí dřív, než sáhnou na API, takže nestojí žádné kredity.
+- **Kdy:** každý den krátce po 8:00 pražského času. GitHub plánované běhy
+  **negarantuje** — při zátěži je zpožďuje o desítky minut a občas některý
+  zahodí. Proto se pokus opakuje každou půlhodinu mezi 6:17 a 9:47 UTC; stačí,
+  aby vyšel jediný. Agent sám hlídá, aby zpráva přišla **jednou denně a ne
+  před 8:00** (GitHub neumí letní čas). Přeskočené běhy skončí dřív, než sáhnou
+  na API, takže nestojí žádné kredity.
+- **Když zpráva nepřijde ani do 10:00**, spusť si běh ručně: *Actions* →
+  *Denni tipy* → *Run workflow*. Zabere to pár vteřin.
 - **Cena:** zdarma. Soukromý repozitář má 2000 minut měsíčně, agent spotřebuje
-  zhruba 90 minut.
+  zhruba 240 minut (8 pokusů denně po necelé minutě).
 - **Klíče** jsou v GitHubu jako šifrované *secrets* (Settings → Secrets and
   variables → Actions). V repozitáři nejsou.
 - **Deník tipů** (`tips.json`) si workflow po každém běhu zapíše zpět do
