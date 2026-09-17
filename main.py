@@ -19,9 +19,9 @@ Priklady spusteni:
     python main.py -v             # podrobny log
 
 Na GitHubu (viz .github/workflows/denni-tipy.yml) bezi:
-    python main.py --once-per-day --not-before 08:00
-GitHub pocita cas v UTC a nezna letni cas, proto se agent spousti vickrat
-a sam hlida, aby zprava prisla jednou denne a ne drive nez v 8:00 v Praze.
+    python main.py --once-per-day --not-before 07:55
+Spousti ho externe cron-job.org v 8:00 a zalozne planovac GitHubu, proto
+agent sam hlida, aby zprava prisla jednou denne a ne drive nez rano v Praze.
 """
 
 from __future__ import annotations

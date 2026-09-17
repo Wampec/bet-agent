@@ -814,7 +814,7 @@ def test_scheduling() -> None:
     if workflow.exists():
         text = workflow.read_text(encoding="utf-8")
         check("workflow spousti agenta s hlidanim casu",
-              "--once-per-day --not-before 08:00" in text)
+              "--once-per-day --not-before 07:55" in text)
         check("workflow bere klice ze secrets",
               all(f"secrets.{k}" in text
                   for k in ("ODDS_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")))

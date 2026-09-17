@@ -1,16 +1,19 @@
 # Denni tipy -- beh agenta na serverech GitHubu, bez zapnuteho pocitace.
 #
 # Kdy se spousti:
-#   GitHub planovane behy NEGARANTUJE -- pri zatezi je zpozdi klidne o desitky
-#   minut a obcas nektery uplne zahodi. Nejhorsi je to v celou hodinu a hned
-#   po ni, proto se spousti v 17. a 47. minute.
 #
-#   Pokus se opakuje kazdou pulhodinu mezi 06:17 a 09:47 UTC, tedy
-#     v lete (SELC) mezi 08:17 a 11:47 v Praze,
-#     v zime (SEC)  mezi 07:17 a 10:47 v Praze.
-#   Staci, aby vysel jediny z nich. Agent sam pozna, ze je pred 8:00 prazskeho
-#   casu nebo ze uz dnes zpravu poslal, a skonci drive, nez sahne na API --
-#   preskoceny beh proto nestoji zadne kredity The Odds API.
+#   1) HLAVNE externe v 8:00 -- sluzba cron-job.org zavola GitHub API
+#      (workflow_dispatch) a beh zacne behem par vterin. Postup nastaveni
+#      je v README, sekce "Automaticke spousteni".
+#
+#   2) ZALOHA planovacem GitHubu. Ten na cas spolehnout nejde: v tomhle
+#      repozitari planovane behy zpozdoval o 6-7 hodin a slucoval je do
+#      jednoho. Zustava jen pro pripad, ze by selhalo externi spousteni --
+#      pak zprava prijde aspon pozdeji.
+#
+#   Agent sam hlida, aby zprava prisla jednou denne a ne pred 7:55 v Praze
+#   (GitHub nezna letni cas). Preskoceny beh skonci drive, nez sahne na API,
+#   a nestoji zadne kredity The Odds API.
 #
 # Rucni spusteni: zalozka Actions -> Denni tipy -> Run workflow.
 #   "Poslat i kdyz uz dnes zprava byla" = zapnout pro test.
@@ -19,7 +22,7 @@ name: Denni tipy
 
 on:
   schedule:
-    - cron: "17,47 6-9 * * *"
+    - cron: "17 7 * * *"
   workflow_dispatch:
     inputs:
       force:
@@ -64,7 +67,7 @@ jobs:
           if [ "$FORCE" = "true" ]; then
             python main.py
           else
-            python main.py --once-per-day --not-before 08:00
+            python main.py --once-per-day --not-before 07:55
           fi
 
       - name: Ulozit denik tipu do repozitare

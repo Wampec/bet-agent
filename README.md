@@ -220,16 +220,16 @@ přegenerován v BotFather). Aktuální najdeš v `/mybots → bot → API Token
 Agent běží na serverech GitHubu podle `.github/workflows/denni-tipy.yml`.
 Počítač nemusí být zapnutý.
 
-- **Kdy:** každý den krátce po 8:00 pražského času. GitHub plánované běhy
-  **negarantuje** — při zátěži je zpožďuje o desítky minut a občas některý
-  zahodí. Proto se pokus opakuje každou půlhodinu mezi 6:17 a 9:47 UTC; stačí,
-  aby vyšel jediný. Agent sám hlídá, aby zpráva přišla **jednou denně a ne
-  před 8:00** (GitHub neumí letní čas). Přeskočené běhy skončí dřív, než sáhnou
-  na API, takže nestojí žádné kredity.
-- **Když zpráva nepřijde ani do 10:00**, spusť si běh ručně: *Actions* →
-  *Denni tipy* → *Run workflow*. Zabere to pár vteřin.
-- **Cena:** zdarma. Soukromý repozitář má 2000 minut měsíčně, agent spotřebuje
-  zhruba 240 minut (8 pokusů denně po necelé minutě).
+- **Kdy:** přesně v 8:00. Spouští to externí služba **cron-job.org**, která
+  v 8:00 pražského času zavolá GitHub API a běh začne během pár vteřin
+  (nastavení níže). Vlastní plánovač GitHubu se na čas použít nedá — v tomhle
+  repozitáři zpožďoval běhy o 6–7 hodin — a zůstává jen jako pozdní záloha.
+  Agent sám hlídá, aby zpráva přišla **jednou denně**; přeskočené běhy skončí
+  dřív, než sáhnou na API, a nestojí žádné kredity.
+- **Když zpráva nepřijde**, spusť si běh ručně: *Actions* → *Denni tipy* →
+  *Run workflow*. Zabere to pár vteřin.
+- **Cena:** zdarma. GitHub (2000 minut měsíčně pro soukromý repozitář, agent
+  spotřebuje ~60) i cron-job.org.
 - **Klíče** jsou v GitHubu jako šifrované *secrets* (Settings → Secrets and
   variables → Actions). V repozitáři nejsou.
 - **Deník tipů** (`tips.json`) si workflow po každém běhu zapíše zpět do
@@ -242,6 +242,44 @@ Počítač nemusí být zapnutý.
 
 Lokální statistiky po přechodu: deník je na GitHubu, takže před
 `python main.py --status` si ho stáhni příkazem `git pull`.
+
+#### Spouštění v 8:00 přes cron-job.org
+
+**1. Token, který smí jen spustit tenhle workflow** — na GitHubu vpravo nahoře
+profilová fotka → *Settings* → úplně dole *Developer settings* → *Personal access
+tokens* → *Fine-grained tokens* → *Generate new token*:
+
+| Pole | Hodnota |
+|---|---|
+| Token name | `cron-job bet-agent` |
+| Expiration | nejdelší nabízená doba |
+| Repository access | *Only select repositories* → `bet-agent` |
+| Permissions → Repository permissions → **Actions** | **Read and write** |
+
+*Generate token* a token si hned zkopíruj — znovu už zobrazit nejde.
+Nic jiného token nesmí, takže kdyby unikl, dá se jím jen spustit tenhle běh.
+
+**2. Úloha na cron-job.org** — založ si účet na <https://cron-job.org> →
+*Cronjobs* → *Create cronjob*:
+
+| Pole | Hodnota |
+|---|---|
+| Title | `Bet Agent` |
+| URL | `https://api.github.com/repos/Wampec/bet-agent/actions/workflows/denni-tipy.yml/dispatches` |
+| Execution schedule | každý den (*Every day*) v **8:00** |
+| *Advanced* → Time zone | **Europe/Prague** |
+| *Advanced* → Request method | **POST** |
+| *Advanced* → Request body | `{"ref":"main"}` |
+| *Advanced* → Headers | `Authorization` = `Bearer TVUJ_TOKEN` |
+| | `Accept` = `application/vnd.github+json` |
+| | `X-GitHub-Api-Version` = `2022-11-28` |
+
+Ulož a vyzkoušej tlačítkem *Test run*. Správná odpověď je **204** (bez obsahu)
+a v GitHubu v *Actions* se hned objeví nový běh. Pokud už dnes zpráva přišla,
+běh proběhne, ale podruhé ji nepošle — to je správně.
+
+Když token vyprší, cron-job.org začne hlásit chybu **401** (a pošle e-mail) —
+stačí vygenerovat nový a vyměnit ho v hlavičce `Authorization`.
 
 ### Záložní způsob: Plánovač úloh ve Windows
 
