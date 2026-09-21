@@ -91,7 +91,8 @@ jsou zařazené podle tehdy uloženého nejlepšího kurzu.
 2. **Konsensus** — udělá se to pro každou sázkovku zvlášť a vezme se **medián**.
    Jedna utržená nabídka tak výsledek nerozhodí.
 3. **Kontrola důvěryhodnosti** — zápas vypadne, jen když je kanceláří málo
-   (< 4), moc se rozcházejí (> 4 p.b.), nebo do začátku zbývá málo času.
+   (< 4) nebo se moc rozcházejí (> 4 p.b.). Čas do začátku se nehlídá — tipy
+   chodí, dokud zápas nezačal (`MIN_MINUTES_BEFORE_START=0`).
 4. **Pásma a seřazení** — zápas se zařadí podle běžného kurzu a v každém pásmu
    se pošlou tři s nejvyšší šancí.
 
@@ -332,7 +333,7 @@ v `settings.env`.
 | `MIN_BOOKMAKERS` | `4` | míň kanceláří = odhadu nevěřit |
 | `MAX_PROB_DISPERSION` | `0.04` | jak moc se smějí kanceláře rozcházet |
 | `TWO_WAY_ONLY` | `false` | `true` vyřadí sporty s remízou (i házenou) |
-| `MIN_MINUTES_BEFORE_START` | `45` | kolik času musí do začátku zbývat |
+| `MIN_MINUTES_BEFORE_START` | `0` | odstup před začátkem zápasu; `0` = tipy chodí, dokud zápas nezačal |
 | `MAX_HOURS_AHEAD` | `24` | den i následující noc |
 | `TRACK_RESULTS` | `true` | hlásit, jak dopadly minulé tipy |
 | `ENABLE_SOCCER` | `false` | zapne drahou fotbalovou větev |

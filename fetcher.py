@@ -301,7 +301,7 @@ class OddsAPIClient:
 def day_window(cfg: Config, now: datetime | None = None) -> tuple[datetime, datetime]:
     """
     Vrati (od, do) v UTC:
-      od = ted + MIN_MINUTES_BEFORE_START (na sazku musi zbyvat cas),
+      od = ted + MIN_MINUTES_BEFORE_START (vychozi 0 = od tohoto okamziku),
       do = drive z [konec dnesniho dne v lokalni zone, ted + MAX_HOURS_AHEAD].
     """
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)

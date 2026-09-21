@@ -181,7 +181,7 @@ class Config:
 
     # --- Casove okno ------------------------------------------------------ #
     timezone: str = "Europe/Prague"
-    min_minutes_before_start: int = 45
+    min_minutes_before_start: int = 0
     # 24 h = cely dnesni den i nadchazejici noc. Nocni zapasy jsou podstatne:
     # NBA zacina v evropskem case typicky mezi 01:00 a 05:00 nasledujiciho dne.
     max_hours_ahead: int = 24
@@ -379,7 +379,7 @@ def load_config() -> Config:
         soccer_markets=_csv("SOCCER_MARKETS", "double_chance,draw_no_bet"),
         soccer_league_whitelist=_soccer_leagues(),
         timezone=_str("TIMEZONE", "Europe/Prague"),
-        min_minutes_before_start=_int("MIN_MINUTES_BEFORE_START", 45),
+        min_minutes_before_start=_int("MIN_MINUTES_BEFORE_START", 0),
         max_hours_ahead=_int("MAX_HOURS_AHEAD", 24),
         same_day_only=_bool("SAME_DAY_ONLY", False),
         odds_bands=_odds_bands(),

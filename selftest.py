@@ -366,10 +366,28 @@ def test_reliability_checks() -> None:
     check("shodne kancelare projdou i pri prisnem prahu",
           len(analyzer.analyze([two_way_event("b2")], tight).tips) == 1)
 
-    late = analyzer.analyze([two_way_event("c", hours=0.2)], cfg)
-    check("zapas tesne pred zacatkem se vyradi", not late.tips)
+    check("vychozi odstup pred zacatkem je 0", cfg.min_minutes_before_start == 0)
+    soon = analyzer.analyze([two_way_event("c", hours=0.2)], cfg)
+    check("zapas za 12 minut se ve vychozim nastaveni posle", len(soon.tips) == 1,
+          f"({[r.reason for r in soon.rejections]})")
+    started = analyzer.analyze([two_way_event("c2", hours=-0.5)], cfg)
+    check("uz zacaty zapas se porad nenabizi", not started.tips)
     check("duvod je oznacen",
+          any(r.stage == analyzer.STAGE_TIME for r in started.rejections))
+
+    buffered = make_cfg(min_minutes_before_start=45)
+    late = analyzer.analyze([two_way_event("c3", hours=0.2)], buffered)
+    check("s odstupem 45 min se zapas tesne pred zacatkem vyradi", not late.tips)
+    check("duvod je oznacen i u odstupu",
           any(r.stage == analyzer.STAGE_TIME for r in late.rejections))
+
+    from fetcher import day_window
+    now = datetime(2026, 9, 21, 8, 0, tzinfo=timezone.utc)
+    start, _ = day_window(cfg, now)
+    check("okno dotazu zacina hned (bez odstupu)", start == now, f"({start})")
+    start45, _ = day_window(buffered, now)
+    check("okno dotazu respektuje odstup, kdyz je nastaveny",
+          start45 == now + timedelta(minutes=45))
 
     strict = make_cfg(min_tip_prob=0.90)
     weak = analyzer.analyze([two_way_event("e", prices=(1.30,) * 4, dog_price=3.6)],
