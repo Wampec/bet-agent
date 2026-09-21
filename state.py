@@ -58,6 +58,12 @@ class SentTip:
     band: str | None = None           # A, B, ... nebo pod / nad / mezi
     shown: bool = True                # False = tichy zbytek, neposlal se
     n_outcomes: int | None = None     # 3 = trh s remizou; u starsich zaznamu chybi
+    # Poradi v ramci pasma: podle sance (odds_rank) a podle AI (ai_rank).
+    # AI poradi je None u tipu z doby pred AI krokem nebo kdyz AI nebezela.
+    odds_rank: int | None = None
+    ai_rank: int | None = None
+    ai_reason: str | None = None
+    ai_confidence: str | None = None
 
     @property
     def commence_dt(self) -> datetime:
@@ -103,6 +109,20 @@ class BandStats:
     def expected(self) -> float | None:
         """Jakou uspesnost agent predpovidal -- kdyz sedi se skutecnosti, vypocty funguji."""
         return self.expected_sum / self.decided if self.decided else None
+
+
+@dataclass
+class AIComparison:
+    """(vyhry, rozhodnute) pro AI vyber a pro cisty kurzovy vyber."""
+
+    ai_top: tuple[int, int] = (0, 0)
+    odds_top: tuple[int, int] = (0, 0)
+    ai_only: tuple[int, int] = (0, 0)     # AI je vybrala, kurzy ne
+    odds_only: tuple[int, int] = (0, 0)   # kurzy je vybraly, AI je vyradila
+
+    @property
+    def has_data(self) -> bool:
+        return self.ai_top[1] > 0 or self.odds_top[1] > 0
 
 
 @dataclass
@@ -222,10 +242,18 @@ class TipLog:
         out.sort(key=lambda t: t.commence_time)
         return out
 
-    def band_stats(self, band: str, stake: float) -> BandStats:
+    def band_stats(self, band: str, stake: float,
+                   shown_only: bool = True) -> BandStats:
+        """
+        Statistika pasma. Vychozi je jen to, co uzivatel opravdu videl ve
+        zprave; tichy zaznam (napr. tip, ktery AI vyradila) by jinak zkresloval
+        cisla, ktera ma uzivatel pred ocima.
+        """
         stats = BandStats()
         for tip in self.tips:
             if tip.band != band:
+                continue
+            if shown_only and not tip.shown:
                 continue
             if tip.status == STATUS_OPEN:
                 stats.pending += 1
@@ -239,6 +267,30 @@ class TipLog:
                 stats.expected_sum += tip.prob
                 stats.profit -= stake
         return stats
+
+    def ai_comparison(self, top_n: int) -> "AIComparison":
+        """
+        Porovna, jak dopadl vyber AI a jak by dopadl cisty vyber podle sance.
+
+        Bere jen tipy z dnu, kdy AI bezela (maji ai_rank). V kazdem pasmu jsou
+        ulozene oba vybery -- AI top_n (poslalo se) i kurzove top_n (kdyz se
+        lisi, ulozilo se potichu) -- takze je srovnani ferove.
+        """
+        settled = [t for t in self.tips
+                   if t.ai_rank is not None and t.status in (STATUS_WON, STATUS_LOST)]
+        ai_top = [t for t in settled if t.ai_rank <= top_n]
+        odds_top = [t for t in settled
+                    if t.odds_rank is not None and t.odds_rank <= top_n]
+        ai_only = [t for t in ai_top if not (t.odds_rank is not None and t.odds_rank <= top_n)]
+        odds_only = [t for t in odds_top if not t.ai_rank <= top_n]
+
+        def rate(items: list[SentTip]) -> tuple[int, int]:
+            return sum(1 for t in items if t.status == STATUS_WON), len(items)
+
+        return AIComparison(
+            ai_top=rate(ai_top), odds_top=rate(odds_top),
+            ai_only=rate(ai_only), odds_only=rate(odds_only),
+        )
 
     def record(self, shown_only: bool = True) -> tuple[int, int]:
         """(pocet vyher, pocet rozhodnutych tipu) -- void se nepocita."""

@@ -10,9 +10,11 @@ duveryhodnosti odhadu, denik tipu, vyhodnoceni vysledku, vyber souteci
 
 from __future__ import annotations
 
+import json
 import math
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import analyzer
 from config import Config, ConfigError, enable_utf8_stdout, load_config
@@ -775,6 +777,347 @@ def test_message() -> None:
     check("varovani o kvote se sestavi", "kvota" in warn.lower())
 
 
+# --------------------------------------------------------------------------- #
+class FakeAI:
+    """Falesny klient Anthropic API -- zaznamena volani a vrati pripravenou odpoved."""
+
+    def __init__(self, payload=None, *, text=None, stop_reason="end_turn",
+                 error=None, usage=(3000, 1500)):
+        self.payload, self.text = payload, text
+        self.stop_reason, self.error, self.usage = stop_reason, error, usage
+        self.calls: list[dict] = []
+        self.messages = self
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.error:
+            raise self.error
+        body = self.text if self.text is not None else json.dumps(self.payload)
+        return SimpleNamespace(
+            content=[SimpleNamespace(type="thinking", thinking=""),
+                     SimpleNamespace(type="text", text=body)],
+            stop_reason=self.stop_reason,
+            usage=SimpleNamespace(input_tokens=self.usage[0],
+                                  output_tokens=self.usage[1]),
+        )
+
+
+def ai_payload(order_by_band: dict[str, list[str]], confidence="medium") -> dict:
+    return {"bands": [
+        {"band": band, "ranking": [
+            {"id": cid, "reason": f"duvod {cid}", "confidence": confidence}
+            for cid in ids]}
+        for band, ids in order_by_band.items()]}
+
+
+def ai_pool(cfg):
+    """5 kandidatu v pasmu A, 2 v B a 1 (hazena) v C -- vsichni prochazi kontrolami."""
+    events = [two_way_event(f"a{i}", f"FavA{i}", f"DogA{i}", prices=(1.16,) * 4,
+                            dog_price=4.4 + 0.3 * i) for i in range(5)]
+    events += [two_way_event(f"b{i}", f"FavB{i}", f"DogB{i}", prices=(1.22,) * 4,
+                             dog_price=4.0 + 0.4 * i) for i in range(2)]
+    events.append(three_way_event("c0", "FavC0", "DogC0", fav_prices=(1.30,) * 4,
+                                  dog_price=4.0, draw_price=9.0))
+    result = analyzer.analyze(events, cfg)
+    wide = analyzer.select_by_band(result.tips, cfg, limit=cfg.ai_pool_per_band)
+    return result, {k: wide[k] for k in "ABC"}
+
+
+def test_ai_ranking() -> None:
+    print("\n[13] AI preporadani")
+    import ai_ranker
+    cfg = make_cfg(anthropic_api_key="test-key")
+    now = datetime.now(timezone.utc)
+    result, pool = ai_pool(cfg)
+
+    check("pool: pasmo A ma 5 kandidatu, B 2, C 1",
+          [len(pool[k]) for k in "ABC"] == [5, 2, 1],
+          f"({[len(pool[k]) for k in 'ABC']})")
+    check("odds_rank je 1..5 podle sance",
+          [t.odds_rank for t in pool["A"]] == [1, 2, 3, 4, 5])
+    check("kandidati jsou serazeni od nejvyssi sance",
+          all(pool["A"][i].prob >= pool["A"][i + 1].prob for i in range(4)))
+    narrow = analyzer.select_by_band(result.tips, cfg)
+    check("bez limitu zustava TIPS_PER_BAND", len(narrow["A"]) == 3)
+    check("odds_rank dostavaji i tipy mimo vyber",
+          sum(1 for t in result.tips if t.odds_rank is not None) == len(result.tips))
+
+    ids = ai_ranker.candidate_ids(pool)
+    check("id kandidatu",
+          set(ids) == {"A1", "A2", "A3", "A4", "A5", "B1", "B2", "C1"},
+          f"({sorted(ids)})")
+
+    # --- zadani -------------------------------------------------------------- #
+    prompt = ai_ranker.build_prompt(pool, cfg, now)
+    check("prompt obsahuje vsechny kandidaty", all(cid in prompt for cid in ids))
+    check("prompt rika, kolik se nechava", "best 3 per band" in prompt)
+    check("tenis: domaci/hoste nema vyznam", "home/away is meaningless" in prompt)
+    check("tymovy sport: hraje doma/venku", "AT HOME" in prompt or "AWAY" in prompt)
+    check("hazena: remiza je prohra", "draw counts as a loss" in prompt)
+    check("prompt uvadi sanci trhu", "win probability" in prompt)
+    check("system prompt zakazuje si vymyslet zive udaje",
+          "NO live data" in ai_ranker.SYSTEM_PROMPT
+          and "NEVER" in ai_ranker.SYSTEM_PROMPT)
+    check("system prompt bere kurzy jako silny vychozi bod",
+          "strong prior" in ai_ranker.SYSTEM_PROMPT)
+
+    # --- spravna odpoved ----------------------------------------------------- #
+    fake = FakeAI(ai_payload({"A": ["A3", "A1", "A2", "A4", "A5"],
+                              "B": ["B2", "B1"], "C": ["C1"]}))
+    ranking = ai_ranker.rank_with_ai(pool, cfg, now, client=fake)
+    check("AI vratila poradi", ranking is not None)
+    call = fake.calls[0]
+    check("pouzity model z nastaveni", call["model"] == "claude-sonnet-5")
+    check("effort je v output_config", call["output_config"]["effort"] == "medium")
+    check("vystup je vazany na JSON schema",
+          call["output_config"]["format"]["type"] == "json_schema")
+    check("neposilaji se parametry, ktere Sonnet 5 odmita",
+          not any(k in call for k in ("temperature", "top_p", "top_k")))
+    check("max_tokens je omezeny", call["max_tokens"] == cfg.ai_max_tokens)
+    check("system prompt se posila", "NO internet" in call["system"])
+    if ranking is None:
+        return
+    check("poradi A podle AI", ranking.order["A"] == ["A3", "A1", "A2", "A4", "A5"])
+    check("verdikt nese duvod a jistotu",
+          ranking.verdicts["A3"].reason == "duvod A3"
+          and ranking.verdicts["A3"].confidence == "medium")
+    check("cena se spocita: 3000 vstup + 1500 vystup pri 2/10 USD",
+          ranking.cost_usd is not None and math.isclose(ranking.cost_usd, 0.021),
+          f"({ranking.cost_usd})")
+    check("tokeny se zaznamenaji",
+          (ranking.input_tokens, ranking.output_tokens) == (3000, 1500))
+    check("neznamy model nema odhad ceny",
+          ai_ranker.estimate_cost("neznamy-model", 1000, 1000) is None)
+
+    # --- pouziti poradi ------------------------------------------------------ #
+    fake2 = FakeAI(ai_payload({"A": ["A5", "A1", "A2", "A3", "A4"],
+                               "B": ["B1", "B2"], "C": ["C1"]}, confidence="low"))
+    result2, pool2 = ai_pool(cfg)
+    ranking2 = ai_ranker.rank_with_ai(pool2, cfg, now, client=fake2)
+    chosen, extras = ai_ranker.apply_ai_order(pool2, ranking2, cfg)
+    a_names = [t.selection for t in chosen["A"]]
+    expected = [pool2["A"][4].selection, pool2["A"][0].selection,
+                pool2["A"][1].selection]
+    check("do zpravy jdou 3 nejlepsi podle AI", a_names == expected, f"({a_names})")
+    check("AI vytahla tip z konce vyberu", chosen["A"][0].odds_rank == 5)
+    check("vyrazeny tip je mezi 'navic'",
+          [t.selection for t in extras["A"]] == [pool2["A"][2].selection],
+          f"({[t.selection for t in extras['A']]})")
+    check("kdyz AI nic nevyradi, neni nic 'navic'",
+          extras["B"] == [] and extras["C"] == [])
+    check("tipy dostaly ai_rank",
+          chosen["A"][0].ai_rank == 1 and pool2["A"][3].ai_rank == 5)
+    check("tipy dostaly duvod a jistotu",
+          chosen["A"][0].ai_reason == "duvod A5"
+          and chosen["A"][0].ai_confidence == "low")
+    check("v pasmu se necha nejvys TIPS_PER_BAND",
+          all(len(v) <= 3 for v in chosen.values()))
+    ai_ranker.log_verdicts(pool2, ranking2)   # nesmi spadnout
+
+    # --- tolerance k chybam v odpovedi ---------------------------------------- #
+    messy = FakeAI({"bands": [
+        {"band": "PASMO A (kurz 1,15-1,19)", "ranking": [
+            {"id": "A2", "reason": "  dvojite   mezery  ", "confidence": "high"},
+            {"id": "A2", "reason": "duplicita", "confidence": "high"},
+            {"id": "Z9", "reason": "neexistuje", "confidence": "high"},
+            {"id": "A1", "reason": "x", "confidence": "nesmysl"},
+        ]}]})
+    _, pool3 = ai_pool(cfg)
+    r3 = ai_ranker.rank_with_ai(pool3, cfg, now, client=messy)
+    check("odpoved s chybami se prece jen pouzije", r3 is not None)
+    if r3:
+        check("duplicita a neznamy kandidat se ignoruji",
+              r3.order["A"][:2] == ["A2", "A1"], f"({r3.order['A']})")
+        check("chybejici kandidati jdou na konec v kurzovem poradi",
+              r3.order["A"] == ["A2", "A1", "A3", "A4", "A5"]
+              and r3.order["B"] == ["B1", "B2"] and r3.order["C"] == ["C1"],
+              f"({r3.order})")
+        check("mezery v duvodu se srovnaji",
+              r3.verdicts["A2"].reason == "dvojite mezery")
+        check("neplatna jistota se bere jako 'low'",
+              r3.verdicts["A1"].confidence == "low")
+        check("dopocteni kandidati nemaji vymysleny duvod",
+              r3.verdicts["A3"].reason == "" and r3.verdicts["A3"].confidence == "low")
+        check("problemy odpovedi se hlasi", len(r3.notes) == 3, f"({r3.notes})")
+
+    # --- vsechna selhani vedou zpet ke kurzum ------------------------------ #
+    def falls_back(name, client, use_cfg=None):
+        _, pl = ai_pool(cfg)
+        res = ai_ranker.rank_with_ai(pl, use_cfg or cfg, now, client=client)
+        untouched = all(t.ai_rank is None for tips in pl.values() for t in tips)
+        check(name, res is None and untouched)
+
+    falls_back("chyba site -> kurzove poradi", FakeAI(error=RuntimeError("boom")))
+    falls_back("neplatny JSON -> kurzove poradi", FakeAI(text="{ nejsem json"))
+    falls_back("prazdny text -> kurzove poradi", FakeAI(text=""))
+    falls_back("odpoved bez pole bands -> kurzove poradi", FakeAI({"neco": 1}))
+    falls_back("bands neni pole -> kurzove poradi", FakeAI({"bands": "x"}))
+    falls_back("zadny platny kandidat -> kurzove poradi",
+               FakeAI(ai_payload({"A": ["X1", "X2"]})))
+    falls_back("dosly tokeny -> kurzove poradi",
+               FakeAI(ai_payload({"A": ["A1"]}), stop_reason="max_tokens"))
+    falls_back("odmitnuti -> kurzove poradi",
+               FakeAI(ai_payload({"A": ["A1"]}), stop_reason="refusal"))
+    falls_back("AI_RANKING=false -> kurzove poradi",
+               FakeAI(ai_payload({"A": ["A1"]})),
+               use_cfg=make_cfg(anthropic_api_key="k", ai_ranking=False))
+
+    idle = FakeAI(ai_payload({"A": ["A1"]}))
+    _, pool_solo = ai_pool(cfg)
+    solo = {"A": pool_solo["A"][:1], "B": pool_solo["B"][:1], "C": []}
+    check("kdyz neni co radit (kazde pasmo max 1), API se nevola",
+          ai_ranker.rank_with_ai(solo, cfg, now, client=idle) is None
+          and not idle.calls)
+    check("bez klice se API nevola a nic se neimportuje",
+          ai_ranker.rank_with_ai(pool_solo, make_cfg(), now) is None)
+
+    # --- choose_tips (cely vyber) ------------------------------------------ #
+    import main as agent_main
+    result4, _ = ai_pool(cfg)
+    fake4 = FakeAI(ai_payload({"A": ["A5", "A1", "A2", "A3", "A4"],
+                               "B": ["B1", "B2"], "C": ["C1"]}))
+    selected, extras4, ai4, failed4 = agent_main.choose_tips(
+        result4.tips, cfg, now, ai_client=fake4)
+    check("choose_tips: AI poradi se pouzije",
+          ai4 is not None and selected["A"][0].odds_rank == 5 and not failed4)
+    check("choose_tips: tichy zbytek se orezava na TIPS_PER_BAND",
+          all(len(selected[k]) <= 3 for k in analyzer.REST_KEYS))
+    check("choose_tips: vraci i 'navic'", len(extras4["A"]) == 1)
+
+    result5, _ = ai_pool(cfg)
+    sel5, ext5, ai5, failed5 = agent_main.choose_tips(result5.tips, make_cfg(), now)
+    check("bez klice: cisty kurzovy vyber, zadne 'navic'",
+          ai5 is None and ext5 == {} and len(sel5["A"]) == 3 and not failed5
+          and [t.odds_rank for t in sel5["A"]] == [1, 2, 3])
+    result6, _ = ai_pool(cfg)
+    sel6, ext6, ai6, failed6 = agent_main.choose_tips(
+        result6.tips, cfg, now, ai_client=FakeAI(error=RuntimeError("boom")))
+    check("pri selhani AI: stejny vyber jako bez AI",
+          ai6 is None and ext6 == {}
+          and [t.selection for t in sel6["A"]] == [t.selection for t in sel5["A"]])
+    check("pri selhani AI se to oznaci (zprava to musi rict)", failed6)
+
+    # kdyz neni co radit, neni to selhani
+    few = [two_way_event("only1", "SoloFav", "SoloDog", prices=(1.16,) * 4,
+                         dog_price=5.0)]
+    res_few = analyzer.analyze(few, cfg)
+    _, _, ai_few, failed_few = agent_main.choose_tips(
+        res_few.tips, cfg, now, ai_client=FakeAI(ai_payload({"A": ["A1"]})))
+    check("kdyz neni co radit, AI se nevola a neni to selhani",
+          ai_few is None and not failed_few)
+
+
+def test_ai_tracking() -> None:
+    print("\n[13b] AI: ukladani a porovnani s kurzovym vyberem")
+    path = Path("tips.selftest.json")
+    tlog = TipLog(path=path)
+
+    def add(eid, status, odds_rank, ai_rank, shown=True, band="A"):
+        tip = sent_tip(eid)
+        tip.status, tip.band, tip.shown = status, band, shown
+        tip.odds_rank, tip.ai_rank = odds_rank, ai_rank
+        tip.median_odds = 1.17
+        tlog.tips.append(tip)
+
+    add("t1", STATUS_WON, 1, 2)                   # oba vybery, vyhral
+    add("t2", STATUS_LOST, 3, 5, shown=False)     # jen kurzy (AI vyradila), prohral
+    add("t3", STATUS_WON, 4, 1)                   # jen AI, vyhral
+    add("t4", STATUS_WON, 2, 3)                   # oba vybery, vyhral
+    add("t5", STATUS_WON, 1, None)                # z doby pred AI -> ignoruje se
+    add("t6", STATUS_OPEN, 1, 1)                  # jeste nevyhodnoceny -> ignoruje se
+    cmp = tlog.ai_comparison(3)
+    check("AI vyber: 3/3", cmp.ai_top == (3, 3), f"({cmp.ai_top})")
+    check("kurzovy vyber: 2/3", cmp.odds_top == (2, 3), f"({cmp.odds_top})")
+    check("jen AI: 1/1", cmp.ai_only == (1, 1), f"({cmp.ai_only})")
+    check("jen kurzy: 0/1", cmp.odds_only == (0, 1), f"({cmp.odds_only})")
+    check("porovnani ma data", cmp.has_data)
+    check("bez AI dat neni co porovnavat",
+          not TipLog(path=path).ai_comparison(3).has_data)
+
+    stats = tlog.band_stats("A", 100.0)
+    check("statistika pasma ignoruje tichy zaznam", stats.decided == 4,
+          f"({stats.decided})")
+    check("statistika vcetne tichych zaznamu je k dispozici",
+          tlog.band_stats("A", 100.0, shown_only=False).decided == 5)
+
+    tlog.save()
+    loaded = TipLog.load(path)
+    t2 = next(t for t in loaded.tips if t.event_id == "t2")
+    check("AI pole prezijou ulozeni",
+          t2.odds_rank == 3 and t2.ai_rank == 5 and not t2.shown)
+    path.write_text(json.dumps({"tips": [{
+        "sent_at": "x", "event_id": "old", "sport_key": "k", "sport_title": "t",
+        "commence_time": "2026-09-01T10:00:00+00:00", "home_team": "a",
+        "away_team": "b", "market": "h2h", "selection": "a", "pick_team": "a",
+        "prob": 0.8, "odds": 1.2}]}), encoding="utf-8")
+    old = TipLog.load(path).tips[0]
+    check("starsi zaznam bez AI poli se nacte",
+          old.ai_rank is None and old.odds_rank is None)
+    path.unlink(missing_ok=True)
+
+
+def test_ai_message() -> None:
+    print("\n[13c] AI: zprava na Telegram a nastaveni")
+    import ai_ranker
+    cfg = make_cfg(anthropic_api_key="k")
+    now = datetime.now(timezone.utc)
+    result, pool = ai_pool(cfg)
+    payload = ai_payload({"A": ["A2", "A1", "A3", "A4", "A5"],
+                          "B": ["B1", "B2"], "C": ["C1"]})
+    payload["bands"][0]["ranking"][0]["confidence"] = "low"
+    payload["bands"][0]["ranking"][1]["reason"] = "Vyrovnany souboj, " + "dlouhy text " * 30
+    ranking = ai_ranker.rank_with_ai(pool, cfg, now, client=FakeAI(payload))
+    chosen, _ = ai_ranker.apply_ai_order(pool, ranking, cfg)
+
+    from state import BandStats
+    stats = {"A": BandStats(), "B": BandStats(), "C": BandStats()}
+    msg = format_tips(result, chosen, stats, [], cfg, ai_used=True)
+    print("\n----- nahled zpravy s AI -----")
+    print(msg)
+    print("----- konec nahledu -----")
+    check("poznamka AI je ve zprave", "duvod A3" in msg)
+    check("nejista poznamka ma otaznik", "❔" in msg)
+    check("jista poznamka ma bublinu", "\U0001f4ac" in msg)
+    check("zprava rika, ze AI nema zive udaje",
+          "Nema zive udaje" in msg and "upravila AI" in msg)
+    check("dlouha poznamka se zkrati", "dlouhy text " * 20 not in msg and "…" in msg)
+    check("vejde se do limitu Telegramu", len(msg) <= 4096, f"(={len(msg)})")
+    check("zadna neescapovana tecka", ". " not in msg.replace("\\. ", " "),
+          "(neescapovana tecka = HTTP 400 z Telegramu)")
+
+    fresh_result, _ = ai_pool(cfg)      # cerstve tipy, kterych se AI nedotkla
+    plain = format_tips(fresh_result,
+                        analyzer.select_by_band(fresh_result.tips, cfg),
+                        stats, [], cfg)
+    check("bez AI zadne upozorneni ani poznamky",
+          "upravila AI" not in plain and "\U0001f4ac" not in plain
+          and "❔" not in plain)
+
+    def fails(**kwargs) -> str:
+        try:
+            make_cfg(**kwargs).validate(require_telegram=False)
+        except ConfigError as exc:
+            return str(exc)
+        return ""
+
+    failed_msg = format_tips(fresh_result,
+                             analyzer.select_by_band(fresh_result.tips, cfg),
+                             stats, [], cfg, ai_failed=True)
+    check("pri selhani AI zprava na to upozorni",
+          "AI preporadani dnes selhalo" in failed_msg
+          and "poradi je podle kurzu" in failed_msg)
+    check("bez selhani zadne upozorneni na selhani",
+          "dnes selhalo" not in plain and "dnes selhalo" not in msg)
+
+    check("AI_POOL_PER_BAND mensi nez TIPS_PER_BAND se odchyti",
+          "AI_POOL_PER_BAND" in fails(ai_pool_per_band=2, tips_per_band=3))
+    check("neznamy AI_EFFORT se odchyti", "AI_EFFORT" in fails(ai_effort="extreme"))
+    check("prazdny AI_MODEL se odchyti", "AI_MODEL" in fails(ai_model=""))
+    check("AI je aktivni jen s klicem",
+          make_cfg(anthropic_api_key="k").ai_active and not make_cfg().ai_active
+          and not make_cfg(anthropic_api_key="k", ai_ranking=False).ai_active)
+
+
 def test_scheduling() -> None:
     print("\n[11b] Planovani na GitHubu (jednou denne, ne pred 8:00)")
     import main as agent_main
@@ -837,6 +1180,10 @@ def test_scheduling() -> None:
               all(f"secrets.{k}" in text
                   for k in ("ODDS_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")))
         check("workflow zapisuje denik zpet", "git push" in text and "tips.json" in text)
+        check("workflow predava ANTHROPIC_API_KEY ze secrets",
+              "secrets.ANTHROPIC_API_KEY" in text)
+        check("selhani instalace anthropic nezabije cely beh",
+              "grep -v '^anthropic'" in text)
 
 
 def test_settings_split() -> None:
@@ -887,6 +1234,9 @@ def main() -> int:
     test_sport_selection()
     test_config_validation()
     test_message()
+    test_ai_ranking()
+    test_ai_tracking()
+    test_ai_message()
     test_scheduling()
     test_settings_split()
     test_escaping()

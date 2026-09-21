@@ -79,6 +79,12 @@ class Tip:
     # Median kurzu favorita napric kancelarmi. Podle nej se tip zaradi do
     # pasma, protoze odpovida tomu, co nabizi bezna kancelar.
     median_odds: float = 0.0
+    # Poradi v ramci pasma podle sance (1 = nejvyssi). Plni select_by_band().
+    odds_rank: int | None = None
+    # Verdikt AI kroku (plni ai_ranker); None = AI tip nehodnotila.
+    ai_rank: int | None = None
+    ai_reason: str = ""
+    ai_confidence: str = ""
 
     @property
     def typical_odds(self) -> float:
@@ -318,17 +324,27 @@ def band_for_odds(odds: float, bands: Sequence[tuple[float, float]]) -> str:
     return REST_BETWEEN
 
 
-def select_by_band(tips: Sequence[Tip], cfg: Config) -> dict[str, list[Tip]]:
+def select_by_band(
+    tips: Sequence[Tip], cfg: Config, limit: int | None = None
+) -> dict[str, list[Tip]]:
     """
-    Rozdeli tipy do pasem a v kazdem necha TIPS_PER_BAND s nejvyssi sanci.
-    Vraci i tichy zbytek (pod / nad / mezi). Tipy musi byt serazene od
-    nejvyssi sance -- tak je vraci analyze().
+    Rozdeli tipy do pasem a v kazdem necha `limit` (vychozi TIPS_PER_BAND)
+    tipu s nejvyssi sanci. Vraci i tichy zbytek (pod / nad / mezi). Tipy musi
+    byt serazene od nejvyssi sance -- tak je vraci analyze().
+
+    Vedlejsi efekt: kazdemu tipu nastavi odds_rank, tedy poradi v ramci pasma
+    podle sance (i u tech, co se do vyberu nevejdou). Diky tomu se da pozdeji
+    porovnat AI poradi s ciste kurzovym.
     """
+    limit = cfg.tips_per_band if limit is None else limit
     keys = [band_key(i) for i in range(len(cfg.odds_bands))] + list(REST_KEYS)
     selected: dict[str, list[Tip]] = {key: [] for key in keys}
+    counters: dict[str, int] = {key: 0 for key in keys}
     for tip in tips:
         key = band_for_odds(tip.typical_odds, cfg.odds_bands)
-        if len(selected[key]) < cfg.tips_per_band:
+        counters[key] += 1
+        tip.odds_rank = counters[key]
+        if len(selected[key]) < limit:
             selected[key].append(tip)
     return selected
 

@@ -196,7 +196,17 @@ def _tip_lines(position: int, tip: Tip, cfg: Config, now: datetime) -> list[str]
         details.append("remiza \\= prohra")
     elif tip.market != "h2h":
         details.append(esc(tip.market_label))
-    return [first, f"    {icon} " + " · ".join(details)]
+    lines = [first, f"    {icon} " + " · ".join(details)]
+    if tip.ai_reason:
+        # Otaznik = AI o tomhle zapase vi malo nebo jen zastarale.
+        marker = "❔" if tip.ai_confidence == "low" else "💬"
+        lines.append(f"    {marker} {esc(_shorten(tip.ai_reason, 150))}")
+    return lines
+
+
+def _shorten(text: str, limit: int) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
 def _stats_line(stats: BandStats, cfg: Config) -> str:
@@ -217,6 +227,8 @@ def format_tips(
     settled: list[SentTip],
     cfg: Config,
     now: datetime | None = None,
+    ai_used: bool = False,
+    ai_failed: bool = False,
 ) -> str:
     """Denni zprava: rekapitulace + tipy po kurzovych pasmech."""
     now = now or datetime.now(cfg.tz)
@@ -246,8 +258,20 @@ def format_tips(
         if result.funnel:
             lines.append(f"Duvody vyrazeni: {esc(result.funnel_line())}")
 
-    lines += ["", esc(f"Virtualne = zisk pri {cfg.virtual_stake:.0f} Kc "
-                      "na kazdy tip, jen pro srovnani pasem.")]
+    lines.append("")
+    if ai_used:
+        # Poctive: AI nema pristup k internetu, tak si nemuze byt jista dnesnimi
+        # zranenimi, pocasim ani formou -- a zprava to musi rict nahlas.
+        lines.append(esc(
+            f"Poradi v pasmech upravila AI ({cfg.ai_model}) z vlastnich znalosti. "
+            "Nema zive udaje (zraneni, pocasi, aktualni forma). "
+            "❔ = o tomhle zapase vi malo."))
+    if ai_failed:
+        lines.append(esc(
+            "⚠️ AI preporadani dnes selhalo (podrobnosti v logu) -- "
+            "poradi je podle kurzu, bez poznamek."))
+    lines.append(esc(f"Virtualne = zisk pri {cfg.virtual_stake:.0f} Kc "
+                     "na kazdy tip, jen pro srovnani pasem."))
     return "\n".join(lines)
 
 

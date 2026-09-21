@@ -95,6 +95,8 @@ jsou zařazené podle tehdy uloženého nejlepšího kurzu.
    chodí, dokud zápas nezačal (`MIN_MINUTES_BEFORE_START=0`).
 4. **Pásma a seřazení** — zápas se zařadí podle běžného kurzu a v každém pásmu
    se pošlou tři s nejvyšší šancí.
+5. **AI přeřazení** (volitelné, viz níže) — z až 6 kandidátů v pásmu vybere
+   a seřadí tři „nejtutovější“ podle toho, co AI o týmech a hráčích ví.
 
 ### Jednu věc je fér vědět
 
@@ -106,6 +108,95 @@ odpovídá skutečné šanci; to je jiná úloha než tahle.
 
 Sázej jen peníze, které můžeš ztratit. Linka pomoci: **800 222 222**
 (Národní linka pro odvykání, ČR).
+
+---
+
+## AI přeřazení tipů
+
+Volitelný krok mezi výpočtem šance a odesláním zprávy. Z každého pásma se AI
+(Claude) předloží **až 6 kandidátů** místo 3, seřadí je podle „nejtutovějšího“
+zápasu a do zprávy jde **3 nejlepší z každého pásma** — formát zprávy se
+nemění, přibude jen jednořádková poznámka u každého tipu.
+
+**Co AI zvažuje:** styl hry soupeře, skutečnou výhodu domácího prostředí
+(u týmových sportů; v tenise „doma/venku“ nic neznamená), loňskou sezónu,
+únavu vyplývající z rozvrhu a povrch nebo halu, pokud je zná.
+
+**Co AI neví — a proto to nesmí předstírat.** Krok běží **bez přístupu na
+internet**. AI nezná dnešní zranění, sestavy, přestupy, počasí ani výsledky
+posledních zápasů. Zadání jí proto výslovně zakazuje si je vymýšlet a nutí ji
+brát pořadí podle kurzů jako silný výchozí bod (kurzy veřejné informace včetně
+zranění a formy z velké části zahrnují). Od pořadí podle kurzů se má odchýlit
+jen z důvodu, který opravdu zná. Zpráva to říká nahlas:
+
+```
+🟢 PÁSMO A · kurz 1,15–1,19
+1. Carlos Alcaraz — 86,0 % · kurz 1,15
+    🎾 ATP Peking · dnes 11:30 · proti Kvalifikant
+    💬 Nejlepší hráč turnaje na tvrdém povrchu, soupeř nezkušený.
+2. Boston Celtics — 81,1 % · kurz 1,21
+    🏀 NBA · zítra 01:30 · proti Washington Wizards
+    ❔ Tým znám jen z minulé sezóny, sestavu nemohu ověřit.
+
+Pořadí v pásmech upravila AI (claude-sonnet-5) z vlastních znalostí. Nemá živé
+údaje (zranění, počasí, aktuální forma). ❔ = o tomhle zápase ví málo.
+```
+
+`❔` znamená, že AI o dvojici ví málo nebo jen zastarale. Když AI ze žádného
+důvodu nezabere (výpadek služby, neplatná odpověď), zpráva přijde s pořadím podle
+kurzů a řádkem „AI přeřazení dnes selhalo“ — AI nikdy nezpůsobí, že zpráva
+nepřijde.
+
+### Zapnutí: klíč Anthropic API
+
+Bez klíče je krok **neaktivní** a agent posílá tipy podle kurzů jako dřív.
+
+1. Na <https://console.anthropic.com> založ účet, v *Billing* dobij kredit
+   (stačí pár dolarů) a v *Settings → Limits* nastav **měsíční limit útraty**,
+   např. 5 USD — víc se pak nikdy nestrhne.
+2. *Settings → API keys → Create key*. Klíč se zobrazí jen jednou.
+3. Na GitHubu v repozitáři: *Settings → Secrets and variables → Actions →
+   New repository secret* → název **`ANTHROPIC_API_KEY`**, hodnota klíč.
+4. Volitelně i do lokálního `.env` (`ANTHROPIC_API_KEY=…`), pokud chceš AI
+   zkoušet z počítače.
+
+### Cena
+
+Jedno volání denně, model `claude-sonnet-5` (2 USD / 10 USD za milion tokenů),
+zhruba 3 000 vstupních a 1 500–3 000 výstupních tokenů: **~0,03 USD denně,
+asi 1 USD měsíčně.** Přesná spotřeba se zapisuje do logu
+(`AI (claude-sonnet-5): 2 600 vstupních + 1 400 výstupních tokenů, ~0.019 USD`).
+Levnější varianta: `AI_MODEL=claude-haiku-4-5` (~0,6 USD měsíčně), silnější
+`claude-opus-5` (~3 USD měsíčně).
+
+### Pomáhá to vůbec? Měří se to
+
+AI je hypotéza, ne jistota. Do deníku se proto ukládá **AI pořadí i pořadí podle
+kurzů**. Tipy, které by podle kurzů šly do zprávy, ale AI je vyřadila, se uloží
+potichu (neposílají se). Po několika týdnech `python main.py --status` ukáže:
+
+```
+AI vs. čistý kurzový výběr (top 3 v pásmu, jen dny, kdy AI běžela):
+  výběr AI:                    41/50 (82%)
+  výběr podle kurzu:           40/50 (80%)
+  jen AI (kurzy ne):           5/7 (71%)
+  jen kurzy (AI je vyřadila):  4/7 (57%)
+  Rozhodují dva poslední řádky -- tam se AI a kurzy liší.
+```
+
+Rozhodují **dva poslední řádky**, protože jen tam se AI a kurzy skutečně liší.
+Malé vzorky nic nedokazují: pár desítek tipů rozdíl 2 % nepotvrdí ani nevyvrátí.
+Pokud AI po měsících nevychází lépe, vypni ji (`AI_RANKING=false`) — nic to
+nestojí a agent se vrátí k pořadí podle kurzů.
+
+### Nastavení
+
+| Proměnná | Výchozí | Význam |
+|---|---|---|
+| `AI_RANKING` | `true` | zapnutí kroku (běží jen s klíčem) |
+| `AI_MODEL` | `claude-sonnet-5` | model |
+| `AI_POOL_PER_BAND` | `6` | kolik kandidátů z pásma se AI předloží |
+| `AI_EFFORT` | `medium` | `low` / `medium` / `high` — hloubka uvažování |
 
 ---
 
@@ -167,6 +258,7 @@ main.py         denní běh: výsledky → nabídka → tipy → Telegram
 ├── config.py   načtení nastavení, sportovní profily, pásma, validace
 ├── fetcher.py  The Odds API: výběr soutěží, kurzy, výsledky
 ├── analyzer.py odstranění marže, konsensus, kontroly, pásma
+├── ai_ranker.py volitelné AI přeřazení kandidátů (Claude API)
 ├── notifier.py sestavení a odeslání zprávy (MarkdownV2)
 └── state.py    deník tipů a statistiky pásem
 

@@ -55,13 +55,23 @@ jobs:
           cache: pip
 
       - name: Nainstalovat knihovny
-        run: pip install -r requirements.txt
+        # Balicek 'anthropic' je jen pro volitelny AI krok. Kdyby se ho nepodarilo
+        # nainstalovat, nesmi kvuli tomu spadnout cely beh -- zprava musi prijit.
+        # Agent pak AI krok preskoci (a ve zprave to rekne).
+        run: |
+          pip install -r requirements.txt || {
+            echo "::warning::Instalace se nezdarila, zkousim bez balicku anthropic (AI krok se preskoci)."
+            grep -v '^anthropic' requirements.txt > requirements-core.txt
+            pip install -r requirements-core.txt
+          }
 
       - name: Spustit agenta
         env:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Volitelny: bez nej se AI preporadani preskoci.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           FORCE: ${{ inputs.force }}
         run: |
           if [ "$FORCE" = "true" ]; then

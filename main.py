@@ -34,9 +34,11 @@ from datetime import datetime, time, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from ai_ranker import AIRanking, apply_ai_order, log_verdicts, rank_with_ai, skip_reason as ai_skip_reason
 from analyzer import (
     REST_ABOVE,
     REST_BELOW,
+    REST_KEYS,
     Tip,
     analyze,
     band_for_odds,
@@ -162,6 +164,27 @@ def print_status(tips: TipLog, cfg: Config) -> None:
         tag = "" if shown else "  (tichy zbytek)"
         print(f"  {key:6} {label:12} {rate:>14} {expected:>7} "
               f"{s.profit:+8.0f}  {s.pending:>4}{tag}")
+
+    if cfg.ai_active:
+        print(f"\nAI preporadani: zapnuto ({cfg.ai_model}, "
+              f"{cfg.ai_pool_per_band} kandidatu na pasmo)")
+    elif cfg.ai_ranking:
+        print("\nAI preporadani: neaktivni -- chybi ANTHROPIC_API_KEY")
+    else:
+        print("\nAI preporadani: vypnuto (AI_RANKING=false)")
+    cmp = tips.ai_comparison(cfg.tips_per_band)
+    if cmp.has_data:
+        def fmt(pair: tuple[int, int]) -> str:
+            wins, decided = pair
+            return f"{wins}/{decided} ({wins / decided:.0%})" if decided else "-"
+
+        print(f"AI vs. cisty kurzovy vyber (top {cfg.tips_per_band} v pasmu, "
+              "jen dny, kdy AI bezela):")
+        print(f"  vyber AI:                    {fmt(cmp.ai_top)}")
+        print(f"  vyber podle kurzu:           {fmt(cmp.odds_top)}")
+        print(f"  jen AI (kurzy ne):           {fmt(cmp.ai_only)}")
+        print(f"  jen kurzy (AI je vyradila):  {fmt(cmp.odds_only)}")
+        print("  Rozhoduji dva posledni radky -- tam se AI a kurzy lisi.")
 
     recent = tips.recently_settled(hours=24 * 14)
     if recent:
@@ -315,21 +338,27 @@ def run(args: argparse.Namespace) -> int:
     result = analyze(pool, cfg, now)
     log.info("Spotreba API: %s", client.quota)
 
-    # V kazdem pasmu nejvyse TIPS_PER_BAND tipu s nejvyssi sanci. Zapasy mimo
-    # pasma (pod / nad) se neposilaji, ale ukladaji se kvuli porovnani.
-    selected = select_by_band(result.tips, cfg)
+    # V kazdem pasmu TIPS_PER_BAND tipu do zpravy -- bud podle AI (z vetsiho
+    # vyberu), nebo podle ciste sance. Zapasy mimo pasma (pod) se neposilaji,
+    # ale ukladaji se kvuli porovnani.
+    selected, extras, ai, ai_failed = choose_tips(result.tips, cfg, now)
     shown_keys = {band_key(i) for i in range(len(cfg.odds_bands))}
     local_day = now.astimezone(cfg.tz).strftime("%Y-%m-%d")
 
     if not args.dry_run:
-        tips.add(
-            [
-                to_sent_tip(tip, band=key, shown=key in shown_keys, now=now)
-                for key, picked in selected.items()
-                for tip in picked
-            ],
-            local_day,
-        )
+        to_store = [
+            to_sent_tip(tip, band=key, shown=key in shown_keys, now=now)
+            for key, picked in selected.items()
+            for tip in picked
+        ]
+        # Kandidati, ktere by podle ciste sance sly do zpravy, ale AI je vyradila:
+        # neposlali se, ale ulozi se potichu, aby slo pozdeji porovnat AI a kurzy.
+        to_store += [
+            to_sent_tip(tip, band=key, shown=False, now=now)
+            for key, picked in extras.items()
+            for tip in picked
+        ]
+        tips.add(to_store, local_day)
         tips.save()
 
     message = format_tips(
@@ -339,9 +368,42 @@ def run(args: argparse.Namespace) -> int:
         settled=tips.recently_settled(),
         cfg=cfg,
         now=now,
+        ai_used=ai is not None,
+        ai_failed=ai_failed,
     )
     _notify(notifier, message)
     return EXIT_OK
+
+
+def choose_tips(
+    tips: list[Tip], cfg: Config, now: datetime, ai_client=None
+) -> tuple[dict[str, list[Tip]], dict[str, list[Tip]], AIRanking | None, bool]:
+    """
+    Vrati (vybrane, navic, verdikt AI, ai_selhala).
+
+    S AI: z kazdeho pasma se AI predlozi AI_POOL_PER_BAND kandidatu, seradi je
+    a do zpravy jde TIPS_PER_BAND nejlepsich. `navic` jsou tipy, ktere by podle
+    ciste sance sly do zpravy, ale AI je vyradila (ukladaji se potichu).
+    Bez AI, nebo kdyz AI selze: TIPS_PER_BAND s nejvyssi sanci, `navic` prazdne,
+    verdikt None. AI tak nikdy nezpusobi, ze zprava nedorazi.
+    `ai_selhala` je True, kdyz se AI spustit mela, ale nepovedlo se to -- zprava
+    to pak uzivateli rekne, aby nehledal poznamky, ktere tam nejsou.
+    """
+    bands = [band_key(i) for i in range(len(cfg.odds_bands))]
+    if cfg.ai_ranking and (cfg.anthropic_api_key or ai_client is not None):
+        wide = select_by_band(tips, cfg, limit=cfg.ai_pool_per_band)
+        pool = {key: wide[key] for key in bands}
+        expected = ai_skip_reason(pool, cfg, ai_client) is None
+        ranking = rank_with_ai(pool, cfg, now, client=ai_client)
+        if ranking is not None:
+            chosen, extras = apply_ai_order(pool, ranking, cfg)
+            log_verdicts(pool, ranking)
+            selected = dict(chosen)
+            for key in REST_KEYS:
+                selected[key] = wide[key][: cfg.tips_per_band]
+            return selected, extras, ranking, False
+        return select_by_band(tips, cfg), {}, None, expected
+    return select_by_band(tips, cfg), {}, None, False
 
 
 def to_sent_tip(tip: Tip, *, band: str, shown: bool, now: datetime) -> SentTip:
@@ -363,6 +425,10 @@ def to_sent_tip(tip: Tip, *, band: str, shown: bool, now: datetime) -> SentTip:
         band=band,
         shown=shown,
         n_outcomes=tip.n_outcomes,
+        odds_rank=tip.odds_rank,
+        ai_rank=tip.ai_rank,
+        ai_reason=tip.ai_reason or None,
+        ai_confidence=tip.ai_confidence or None,
     )
 
 
