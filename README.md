@@ -177,23 +177,28 @@ Bez **obou** klíčů je krok neaktivní a tipy jdou podle kurzů jako dřív.
 3. Na GitHubu: *Settings → Secrets and variables → Actions → New repository
    secret* → název **`ANTHROPIC_API_KEY`**.
 
-**Google (Gemini), zdarma:**
+**Google (Gemini), placená úroveň:**
 1. Na <https://aistudio.google.com> se přihlas účtem Google → *Get API key* →
-   *Create API key*. Platební údaje nezadávej, pak zůstaneš v bezplatné úrovni
-   a nic se nestrhne.
-2. Na GitHubu stejně jako výše, název **`GEMINI_API_KEY`**.
+   *Create API key*.
+2. U projektu s klíčem zapni fakturaci (*Set up billing*) a přidej platební
+   kartu. Bezplatná úroveň nestačí: má jen 20 dotazů denně na model a rešerše
+   jich potřebuje víc.
+3. V [Google Cloud Console](https://console.cloud.google.com/billing) →
+   *Budgets & alerts* nastav rozpočet, např. 5 USD měsíčně, s upozorněním
+   e-mailem. Rozpočet jen upozorňuje, útratu nezastaví; počet dotazů ale
+   drží na uzdě agent sám (nejvýš ~25 denně).
+4. Na GitHubu stejně jako výše, název **`GEMINI_API_KEY`**.
 
 Oba klíče můžeš volitelně dát i do lokálního `.env`.
 
 ### Cena
 
-- **Gemini:** bezplatná úroveň, model `gemini-2.5-flash`. Bezplatné vyhledávání
-  Google (grounding) mají jen modely 2.5 Flash a 2.5 Flash-Lite — 500 dotazů
-  denně, sdíleně mezi nimi; rešerše udělá jeden dotaz na zápas (typicky 5–15 denně). Dotazy jdou
-  s odstupem podle `GEMINI_RPM`, aby nepřekročily limit 10 za minutu. Modely
-  Gemini 3.x bezplatné vyhledávání vůbec nemají, proto se nepoužívají. Pozor:
-  v bezplatné úrovni smí Google data z dotazů použít ke zlepšování svých
-  modelů. Tady jde jen o veřejné údaje o zápasech.
+- **Gemini** (placená úroveň, `gemini-2.5-flash`: 0,30 / 2,50 USD za milion
+  tokenů): rešerše udělá jeden dotaz na zápas (typicky 5–15 denně), analytik
+  1–3 odpovědi. Vyhledávání Google je u modelů 2.5 zdarma do 1 500 dotazů
+  denně. **Orientačně 3–6 USD měsíčně.** Silnější `gemini-3.8-flash`
+  (`GEMINI_RESEARCH_MODEL`, `GEMINI_MODEL`) vyjde asi na dvojnásobek; u modelů
+  3.x je 5 000 vyhledávání měsíčně zdarma.
 - **Claude** (`claude-sonnet-5`, 2 / 10 USD za milion tokenů): úvodní verdikt
   a nejvýš 2 odpovědi denně. Úvodní zadání s rešerší jde do prompt cache, takže
   opakované čtení stojí desetinu. **Orientačně 2–4 USD měsíčně.** Přesná
@@ -229,8 +234,9 @@ vrátí k pořadí podle kurzů a přestaneš za AI platit.
 | `AI_AGREE_GAP` | `10` | shoda = stejné 1. místo a odhady nejvýš N bodů od sebe |
 | `AI_MODEL` | `claude-sonnet-5` | model skeptika |
 | `AI_EFFORT` | `medium` | `low` / `medium` / `high`, hloubka uvažování Clauda |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | model pro rešerši a analytika (bezplatné vyhledávání má jen 2.5 Flash/Flash-Lite) |
-| `GEMINI_RPM` | `8` | kolik dotazů na Gemini za minutu (bezplatný limit je 10) |
+| `GEMINI_RESEARCH_MODEL` | `gemini-2.5-flash` | model pro rešerši s vyhledáváním Google |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | model analytika v debatě |
+| `GEMINI_RPM` | `8` | kolik dotazů na Gemini za minutu |
 
 
 ---

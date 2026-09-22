@@ -3,8 +3,8 @@ gemini.py -- minimalni klient Gemini API (REST models.generateContent).
 
 Zamerne bez SDK od Googlu: staci knihovna requests, kterou agent uz ma, a
 REST rozhrani se meni mene nez SDK. Pouziva se na dve veci:
-  - resers s vyhledavanim Google (search=True) -- v bezplatne urovni ho maji
-    jen gemini-2.5-flash a 2.5-flash-lite (500 dotazu denne, spolecne),
+  - resers s vyhledavanim Google (search=True) -- pocita s placenou urovni;
+    bezplatna ma jen 20 dotazu denne na model a na resers nestaci,
   - odpovedi agenta Gemini v debate (JSON podle schematu, bez vyhledavani).
 
 Klic se posila v hlavicce, ne v URL -- nedostane se tak do logu s chybou.
@@ -92,6 +92,7 @@ class GeminiClient:
         search: bool = False,
         schema: dict | None = None,
         max_tokens: int = 8192,
+        model: str | None = None,
     ) -> GeminiReply:
         body: dict[str, Any] = {
             "contents": contents,
@@ -104,7 +105,7 @@ class GeminiClient:
             body["generationConfig"]["responseMimeType"] = "application/json"
             body["generationConfig"]["responseJsonSchema"] = strip_additional_properties(schema)
 
-        url = API_URL.format(model=self.model)
+        url = API_URL.format(model=model or self.model)
         headers = {"x-goog-api-key": self.api_key, "Content-Type": "application/json"}
         last_error = ""
         for attempt in range(1, self.retries + 1):
@@ -118,6 +119,11 @@ class GeminiClient:
                     return _parse(resp.json())
                 last_error = f"HTTP {resp.status_code}: {resp.text[:300]}"
                 if resp.status_code not in RETRY_STATUSES:
+                    break
+                if resp.status_code == 429 and "PerDay" in resp.text:
+                    # Denni limit -- cekani nepomuze, obnovi se az o pulnoci
+                    # pacifickeho casu (v 9:00 u nas).
+                    last_error = "vycerpan denni limit dotazu Gemini API"
                     break
             if attempt < self.retries:
                 wait = 15.0 * attempt

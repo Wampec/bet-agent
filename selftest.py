@@ -813,20 +813,25 @@ class FakeGemini:
     """Falesny GeminiClient: resers (search=True) a odpovedi v debate postupne."""
 
     def __init__(self, *payloads, research="- fakt z webu (zdroj)",
-                 research_error=None, error=None, text=None):
+                 research_error=None, error=None, text=None, no_search=0):
         self.payloads, self.research = list(payloads), research
+        self.no_search = no_search          # kolik reserse probehne bez hledani
         self.research_error, self.error, self.text = research_error, error, text
         self.calls: list[dict] = []
         self.debate_calls = 0
         self.model = "gemini-test"
 
-    def generate(self, contents, *, system, search=False, schema=None, max_tokens=8192):
+    def generate(self, contents, *, system, search=False, schema=None, max_tokens=8192,
+                 model=None):
         from gemini import GeminiReply
         self.calls.append({"contents": list(contents), "system": system,
-                           "search": search, "schema": schema})
+                           "search": search, "schema": schema, "model": model})
         if search:
             if self.research_error:
                 raise self.research_error
+            if self.no_search > 0:
+                self.no_search -= 1
+                return GeminiReply(text="z pameti: tym neexistuje")
             return GeminiReply(text=self.research, sources=[("web", "https://x")],
                                queries=["q"], input_tokens=100, output_tokens=200)
         if self.error:
@@ -1060,6 +1065,31 @@ def test_ai_ranking() -> None:
         check("prubeh ma resers ke kazdemu zapasu zvlast",
               "### Resers A1" in r4.transcript and "### Resers C1" in r4.transcript)
 
+    # --- Gemini nehleda na webu ---------------------------------------------- #
+    _, pool_ns = ai_pool(cfg)
+    gem_ns = FakeGemini(verdict({"A": AGREE_A, "B": AGREE_B, "C": AGREE_C}), no_search=1)
+    r_ns = ai_debate.run_debate(pool_ns, cfg, now, gemini_client=gem_ns,
+                                claude_client=FakeAI(verdict({"A": AGREE_A, "B": AGREE_B, "C": AGREE_C})))
+    research_ns = [c for c in gem_ns.calls if c["search"]]
+    check("resers pouziva vlastni model (GEMINI_RESEARCH_MODEL)",
+          all(c["model"] == cfg.gemini_research_model for c in research_ns))
+    check("bez hledani se resers zopakuje s duraznym pokynem",
+          len(research_ns) == 9
+          and "did not use Google Search" in research_ns[1]["contents"][0]["parts"][0]["text"])
+    check("po opakovani se pouzije nalezeny rozbor",
+          r_ns is not None and "z pameti" not in r_ns.transcript)
+    _, pool_ns2 = ai_pool(cfg)
+    r_ns2 = ai_debate.run_debate(
+        pool_ns2, cfg, now,
+        gemini_client=FakeGemini(verdict({"A": AGREE_A, "B": AGREE_B, "C": AGREE_C}),
+                                 no_search=ai_debate.RESEARCH_ATTEMPTS),
+        claude_client=FakeAI(verdict({"A": AGREE_A, "B": AGREE_B, "C": AGREE_C})))
+    check("rozbor z pameti (ani napodruhe nehledal) se zahodi",
+          r_ns2 is not None and "z pameti" not in r_ns2.transcript
+          and "nic nevyhledal" in r_ns2.transcript)
+    check("resers nikdy netvrdi, ze tym neexistuje",
+          "never claim a team or player does not exist" in ai_debate.RESEARCH_SYSTEM)
+
     # --- selhani agentu vede zpet ke kurzum ---------------------------------- #
     def falls_back(name, claude_client, gemini_client, use_cfg=None):
         _, pl = ai_pool(cfg)
@@ -1227,6 +1257,15 @@ def test_gemini_client() -> None:
     check("tempo: dotazy nejdriv 7,5 s po sobe", slept == [7.5, 7.5], f"({slept})")
 
     raises("HTTP 400 -> chyba hned", Resp(400, text="bad"))
+    quota_http = Http(Resp(429, text='"quotaId": "GenerateRequestsPerDayPerProjectPerModel"'))
+    try:
+        GeminiClient("k", "m", http=quota_http, sleep=lambda s: None).generate([], system="s")
+    except GeminiError as exc:
+        check("denni limit -> hned chyba bez zbytecnych pokusu",
+              len(quota_http.calls) == 1 and "denni limit" in str(exc))
+    model_http = Http(Resp(200, ok))
+    GeminiClient("k", "vychozi", http=model_http).generate([], system="s", model="jiny")
+    check("model jde zmenit pro jeden dotaz", "models/jiny:" in model_http.calls[0][0])
     raises("opakovane 503 -> chyba", Resp(503), Resp(503), Resp(503))
     raises("dosly tokeny -> chyba",
            Resp(200, {"candidates": [{"content": {"parts": [{"text": "x"}]},

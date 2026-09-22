@@ -223,7 +223,8 @@ class Config:
     ai_max_turns: int = 4              # odpovedi v debate po uvodnich verdiktech
     ai_agree_gap: int = 10             # shoda = stejne 1. misto a odhady do N bodu
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-2.5-flash"            # analytik v debate
+    gemini_research_model: str = "gemini-2.5-flash"   # resers s vyhledavanim
     gemini_max_tokens: int = 16000
     gemini_timeout: float = 180.0
     gemini_rpm: int = 8                # dotazu za minutu (bezplatna uroven: 10)
@@ -286,6 +287,8 @@ class Config:
             problems.append("AI_AGREE_GAP musi byt 0 az 100")
         if self.gemini_rpm < 1:
             problems.append("GEMINI_RPM musi byt >= 1")
+        if not self.gemini_research_model:
+            problems.append("GEMINI_RESEARCH_MODEL nesmi byt prazdny")
         if not self.gemini_model:
             problems.append("GEMINI_MODEL nesmi byt prazdny")
         problems += _band_problems(self.odds_bands)
@@ -443,6 +446,7 @@ def load_config() -> Config:
         ai_agree_gap=_int("AI_AGREE_GAP", 10),
         gemini_api_key=_str("GEMINI_API_KEY"),
         gemini_model=_str("GEMINI_MODEL", "gemini-2.5-flash"),
+        gemini_research_model=_str("GEMINI_RESEARCH_MODEL", "gemini-2.5-flash"),
         gemini_max_tokens=_int("GEMINI_MAX_TOKENS", 16000),
         gemini_timeout=_float("GEMINI_TIMEOUT", 180.0),
         gemini_rpm=_int("GEMINI_RPM", 8),

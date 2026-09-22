@@ -4,14 +4,17 @@ nejtutovejsi.
 
 Postup
 ------
-1. RESERS: Gemini s vyhledavanim Google dohleda ke kandidatum kazdeho pasma
-   zraneni, formu, vzajemne zapasy, program a unavu, motivaci, pocasi.
-   Stejne podklady pak dostanou oba agenti.
+1. RESERS: Gemini s vyhledavanim Google pripravi ke kazdemu zapasu zvlast
+   rozbor pred zapasem (forma, sestavy, H2H, styl, motivace, program, povrch
+   nebo pocasi, co cekaji preview). Kdyz model na webu nehleda a pise
+   z pameti (ta je zastarala), zkusi se to znovu a pak se rozbor zahodi.
+   Stejne podklady dostanou oba agenti.
 2. UVODNI VERDIKTY: Gemini (ANALYTIK) a Claude (SKEPTIK) nezavisle na sobe
    ohodnoti kazdeho kandidata: vlastni odhad sance na vyhru (0-100) + argument.
-3. DEBATA: v pasmech, kde se neshodnou na 1. miste, se stridaji v odpovedich
-   (Gemini, Claude, Gemini...) -- kazdy vidi posledni verdikt a argumenty
-   soupere -- dokud se neshodnou, nejvys AI_MAX_TURNS odpovedi.
+3. DEBATA: shoda = stejne 1. misto a odhady nejvys AI_AGREE_GAP bodu od sebe,
+   takze se posuzuje i pasmo s jedinym zapasem. Kde shoda neni, stridaji se
+   v odpovedich (Gemini, Claude, Gemini...) -- kazdy vidi posledni verdikt
+   a argumenty soupere -- dokud se neshodnou, nejvys AI_MAX_TURNS odpovedi.
 4. VERDIKT POCITA KOD, ne treti AI (ta by mohla "ustoupit", jen aby byl
    konec): 1. misto = na cem se shodli; kdyz se neshodli, nejvyssi prumer
    obou odhadu a zprava to oznaci. Zbytek pasma podle prumeru obou odhadu.
@@ -45,6 +48,7 @@ log = logging.getLogger(__name__)
 
 MAX_MATCH_CHARS = 4500        # rozbor jednoho zapasu -- drzi cenu vstupu na uzde
 RESEARCH_WORKERS = 4          # soubezne reserse; tempo stejne hlida GEMINI_RPM
+RESEARCH_ATTEMPTS = 3         # kolikrat zkusit rozbor, kdyz model na webu nehleda
 
 # --------------------------------------------------------------------------- #
 # Zadani
@@ -52,7 +56,10 @@ RESEARCH_WORKERS = 4          # soubezne reserse; tempo stejne hlida GEMINI_RPM
 RESEARCH_SYSTEM = """\
 You are an experienced sports analyst preparing pre-match briefings for a \
 bettor. Use Google Search thoroughly - several searches per match (form, \
-injuries and team news, head-to-head, previews and predictions). Be concrete: \
+injuries and team news, head-to-head, previews and predictions). ALWAYS \
+search: your own knowledge is out of date - new teams, leagues and players \
+appear every season, so never claim a team or player does not exist; search \
+for it instead. Be concrete: \
 dates, scores, names, numbers. Never invent anything; say plainly what you \
 could not find. Write in Czech.\
 """
@@ -79,6 +86,13 @@ odds have moved, if you find it.
 risks of an upset.
 
 Mark anything uncertain or older than a few weeks. 250-450 words.\
+"""
+
+SEARCH_NUDGE = """
+
+IMPORTANT: your previous answer did not use Google Search at all. Search the \
+web now (several searches) - answers from memory are out of date and useless \
+here. Use only what you find.\
 """
 
 COMMON_RULES = """\
@@ -347,14 +361,30 @@ def research_match(
         prob=f"{tip.prob * 100:.0f}",
         draw=" (a draw would lose the tip)" if tip.has_draw else "",
     )
+    # Model se muze rozhodnout nehledat a psat z pameti -- ta je zastarala
+    # (nezna treba nove tymy) a agenty by svedla. Proto se to zkousi znovu
+    # s duraznym pokynem; kdyz nehleda ani pak, rozbor se zahodi.
+    reply = None
     try:
-        reply = gemini.generate(
-            [{"role": "user", "parts": [{"text": prompt}]}],
-            system=RESEARCH_SYSTEM, search=True, max_tokens=cfg.gemini_max_tokens)
+        for attempt in range(1, RESEARCH_ATTEMPTS + 1):
+            text = prompt if attempt == 1 else prompt + SEARCH_NUDGE
+            reply = gemini.generate(
+                [{"role": "user", "parts": [{"text": text}]}],
+                system=RESEARCH_SYSTEM, search=True, max_tokens=cfg.gemini_max_tokens,
+                model=cfg.gemini_research_model)
+            if reply.queries:
+                break
+            log.warning("Resers %s: Gemini nehledal na webu (pokus %s/%s).",
+                        cid, attempt, RESEARCH_ATTEMPTS)
     except GeminiError as exc:
         log.warning("Resers %s (%s) selhala: %s", cid, match_name(tip), exc)
         return Dossier(text="(Resers k tomuto zapasu selhala -- zadna data z webu.)",
                        ok=False)
+    if reply is None or not reply.queries:
+        log.warning("Resers %s (%s): Gemini na webu nehledal, rozbor zahazuji.",
+                    cid, match_name(tip))
+        return Dossier(text="(Gemini k tomuto zapasu na webu nic nevyhledal -- "
+                            "zadna data z webu.)", ok=False)
     text = reply.text
     if len(text) > MAX_MATCH_CHARS:
         text = text[:MAX_MATCH_CHARS].rstrip() + "\n[...zkraceno]"
@@ -544,7 +574,7 @@ def run_debate(
         return None
 
     ranking = _decide(pool, g_now, c_now, agreed_at, notes)
-    ranking.model = f"{cfg.gemini_model} + {cfg.ai_model}"
+    ranking.model = f"{cfg.gemini_research_model} / {cfg.gemini_model} + {cfg.ai_model}"
     ranking.input_tokens = claude.input_tokens + claude.cache_write + claude.cache_read
     ranking.output_tokens = claude.output_tokens
     ranking.cost_usd = claude.cost_usd
@@ -623,7 +653,7 @@ def _transcript(
     local = now.astimezone(cfg.tz)
     out = [f"# Debata {local:%d.%m.%Y}",
            "",
-           f"Resers: {cfg.gemini_model} s vyhledavanim Google, kazdy zapas zvlast. "
+           f"Resers: {cfg.gemini_research_model} s vyhledavanim Google, kazdy zapas zvlast. "
            f"Analytik: {cfg.gemini_model}. Skeptik: {cfg.ai_model}. "
            f"Shoda = stejne 1. misto a odhady nejvys {cfg.ai_agree_gap} bodu od sebe. "
            f"Nejvys {cfg.ai_max_turns} odpovedi po uvodnich verdiktech."]
