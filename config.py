@@ -221,10 +221,12 @@ class Config:
     ai_max_tokens: int = 8000
     ai_timeout: float = 120.0
     ai_max_turns: int = 4              # odpovedi v debate po uvodnich verdiktech
+    ai_agree_gap: int = 10             # shoda = stejne 1. misto a odhady do N bodu
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
     gemini_max_tokens: int = 16000
     gemini_timeout: float = 180.0
+    gemini_rpm: int = 8                # dotazu za minutu (bezplatna uroven: 10)
 
     # --- Spolehlivost odhadu ---------------------------------------------- #
     # Tohle nejsou filtry na "kvalitu sazky", ale na to, jestli se da odhadu
@@ -280,6 +282,10 @@ class Config:
             problems.append("AI_MAX_TOKENS musi byt >= 1000")
         if not 0 <= self.ai_max_turns <= 10:
             problems.append("AI_MAX_TURNS musi byt 0 az 10")
+        if not 0 <= self.ai_agree_gap <= 100:
+            problems.append("AI_AGREE_GAP musi byt 0 az 100")
+        if self.gemini_rpm < 1:
+            problems.append("GEMINI_RPM musi byt >= 1")
         if not self.gemini_model:
             problems.append("GEMINI_MODEL nesmi byt prazdny")
         problems += _band_problems(self.odds_bands)
@@ -434,10 +440,12 @@ def load_config() -> Config:
         ai_max_tokens=_int("AI_MAX_TOKENS", 8000),
         ai_timeout=_float("AI_TIMEOUT", 120.0),
         ai_max_turns=_int("AI_MAX_TURNS", 4),
+        ai_agree_gap=_int("AI_AGREE_GAP", 10),
         gemini_api_key=_str("GEMINI_API_KEY"),
         gemini_model=_str("GEMINI_MODEL", "gemini-2.5-flash"),
         gemini_max_tokens=_int("GEMINI_MAX_TOKENS", 16000),
         gemini_timeout=_float("GEMINI_TIMEOUT", 180.0),
+        gemini_rpm=_int("GEMINI_RPM", 8),
         min_bookmakers=_int("MIN_BOOKMAKERS", 4),
         max_prob_dispersion=_float("MAX_PROB_DISPERSION", 0.04),
         devig_method=_str("DEVIG_METHOD", "shin").lower(),

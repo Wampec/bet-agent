@@ -120,22 +120,26 @@ každého tipu přibude jen poznámka s odhady obou agentů a hlavním argumente
 
 **Jak debata probíhá:**
 
-1. **Rešerše.** Gemini s vyhledáváním Google ke každému kandidátovi dohledá
-   zranění a absence, posledních ~5 výsledků, vzájemné zápasy, bilanci doma
-   a venku, program a únavu, motivaci (tabulka) a u venkovních sportů počasí.
-   Píše jen fakta s datem a zdrojem, a co nenašel, výslovně uvede. Stejné
-   podklady pak dostanou oba agenti.
+1. **Rešerše.** Gemini s vyhledáváním Google připraví ke **každému zápasu
+   zvlášť** rozbor jako před zápasem: formu s výsledky, zranění a sestavy,
+   vzájemné zápasy, herní styl a jak sedí na soupeře, tabulku a motivaci,
+   program a únavu, povrch nebo počasí, co čekají preview a tipéři, a nakonec
+   hlavní důvody pro favorita a rizika překvapení. Co nenašel, výslovně uvede.
+   Stejné podklady pak dostanou oba agenti.
 2. **Úvodní verdikty.** Každý agent nezávisle odhadne u každého kandidáta šanci
    na výhru (0–100 %) a napíše argument. Každý má jinou roli:
    - **Gemini = analytik.** Staví na datech: forma, vzájemné zápasy, doma
      a venku, program, tabulka. Velká jména na něj neplatí.
    - **Claude = skeptik.** Hledá, proč favorit prohraje: absence, rotace,
      únava, cestování, motivace, nevhodný herní styl, počasí, chybějící data.
-3. **Debata.** V pásmech, kde se neshodnou na 1. místě, se střídají v odpovědích
-   (Gemini, Claude, Gemini…). Každý vidí soupeřovy odhady a argumenty a musí
-   na nejsilnější z nich odpovědět. Názor smí změnit jen kvůli konkrétnímu
-   faktu, ne proto, aby debata skončila. Debata končí, jakmile se agenti
-   shodnou, nejpozději po `AI_MAX_TURNS` (4) odpovědích.
+3. **Debata.** Shoda znamená **stejné 1. místo a odhady jeho šance nejvýš
+   `AI_AGREE_GAP` (10) bodů od sebe**. Posuzuje se proto i pásmo s jediným
+   zápasem: když jeden agent dá favoritovi 85 % a druhý 65 %, musí se
+   dohadovat. Kde shoda není, střídají se v odpovědích (Gemini, Claude,
+   Gemini…). Každý vidí soupeřovy odhady a argumenty a musí na nejsilnější
+   z nich odpovědět. Názor smí změnit jen kvůli konkrétnímu faktu, ne proto,
+   aby debata skončila. Debata končí shodou, nejpozději po `AI_MAX_TURNS` (4)
+   odpovědích.
 4. **Verdikt spočítá kód, ne třetí AI.** Na 1. místo jde zápas, na kterém se
    shodli. Pokud se neshodli, rozhodne vyšší průměr obou odhadů a zpráva to
    označí. Zbytek pásma se seřadí podle průměru obou odhadů.
@@ -185,7 +189,8 @@ Oba klíče můžeš volitelně dát i do lokálního `.env`.
 
 - **Gemini:** bezplatná úroveň, model `gemini-2.5-flash`. Bezplatné vyhledávání
   Google (grounding) mají jen modely 2.5 Flash a 2.5 Flash-Lite — 500 dotazů
-  denně, sdíleně mezi nimi; rešerše jich spotřebuje zhruba 5–15 denně. Modely
+  denně, sdíleně mezi nimi; rešerše udělá jeden dotaz na zápas (typicky 5–15 denně). Dotazy jdou
+  s odstupem podle `GEMINI_RPM`, aby nepřekročily limit 10 za minutu. Modely
   Gemini 3.x bezplatné vyhledávání vůbec nemají, proto se nepoužívají. Pozor:
   v bezplatné úrovni smí Google data z dotazů použít ke zlepšování svých
   modelů. Tady jde jen o veřejné údaje o zápasech.
@@ -221,9 +226,11 @@ vrátí k pořadí podle kurzů a přestaneš za AI platit.
 | `AI_RANKING` | `true` | zapnutí kroku (běží jen s oběma klíči) |
 | `AI_POOL_PER_BAND` | `5` | kolik kandidátů z pásma jde do debaty |
 | `AI_MAX_TURNS` | `4` | nejvýš odpovědí v debatě po úvodních verdiktech |
+| `AI_AGREE_GAP` | `10` | shoda = stejné 1. místo a odhady nejvýš N bodů od sebe |
 | `AI_MODEL` | `claude-sonnet-5` | model skeptika |
 | `AI_EFFORT` | `medium` | `low` / `medium` / `high`, hloubka uvažování Clauda |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | model pro rešerši a analytika (bezplatné vyhledávání má jen 2.5 Flash/Flash-Lite) |
+| `GEMINI_RPM` | `8` | kolik dotazů na Gemini za minutu (bezplatný limit je 10) |
 
 
 ---

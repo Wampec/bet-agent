@@ -3,8 +3,8 @@ gemini.py -- minimalni klient Gemini API (REST models.generateContent).
 
 Zamerne bez SDK od Googlu: staci knihovna requests, kterou agent uz ma, a
 REST rozhrani se meni mene nez SDK. Pouziva se na dve veci:
-  - resers s vyhledavanim Google (search=True) -- bezplatna uroven Gemini API
-    ma pro modely 3.x 5000 vyhledavacich dotazu mesicne,
+  - resers s vyhledavanim Google (search=True) -- v bezplatne urovni ho maji
+    jen gemini-2.5-flash a 2.5-flash-lite (500 dotazu denne, spolecne),
   - odpovedi agenta Gemini v debate (JSON podle schematu, bez vyhledavani).
 
 Klic se posila v hlavicce, ne v URL -- nedostane se tak do logu s chybou.
@@ -13,6 +13,7 @@ Klic se posila v hlavicce, ne v URL -- nedostane se tak do logu s chybou.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -58,6 +59,8 @@ class GeminiClient:
         retries: int = 3,
         http: Any = None,
         sleep: Callable[[float], None] = time.sleep,
+        min_interval: float = 0.0,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.api_key = api_key
         self.model = model
@@ -66,6 +69,20 @@ class GeminiClient:
         # requests.post je bezpecne volat z vice vlaken (Session nemusi byt).
         self._http = http if http is not None else requests
         self._sleep = sleep
+        # Bezplatna uroven ma limit dotazu za minutu -- dotazy (i z vice vlaken)
+        # se proto spousti nejdriv min_interval sekund po sobe.
+        self.min_interval = max(0.0, min_interval)
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._next_start = 0.0
+
+    def _wait_turn(self) -> None:
+        with self._lock:
+            now = self._clock()
+            start = max(now, self._next_start)
+            self._next_start = start + self.min_interval
+        if start > now:
+            self._sleep(start - now)
 
     def generate(
         self,
@@ -91,6 +108,7 @@ class GeminiClient:
         headers = {"x-goog-api-key": self.api_key, "Content-Type": "application/json"}
         last_error = ""
         for attempt in range(1, self.retries + 1):
+            self._wait_turn()
             try:
                 resp = self._http.post(url, json=body, headers=headers, timeout=self.timeout)
             except requests.RequestException as exc:

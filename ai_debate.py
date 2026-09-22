@@ -33,7 +33,7 @@ from datetime import datetime
 from typing import Any
 
 from ai_ranker import (
-    AGREED, DISPUTED, SOLID, THIN,
+    AGREED, DISPUTED, SOLID, SPORT_CS, THIN,
     AIRanking, AIRankingError, AIVerdict,
     describe, estimate_cost, make_anthropic_client, match_name,
 )
@@ -43,40 +43,42 @@ from gemini import GeminiClient, GeminiError
 
 log = logging.getLogger(__name__)
 
-MAX_DOSSIER_CHARS = 7000      # na pasmo -- drzi cenu vstupu na uzde
+MAX_MATCH_CHARS = 4500        # rozbor jednoho zapasu -- drzi cenu vstupu na uzde
+RESEARCH_WORKERS = 4          # soubezne reserse; tempo stejne hlida GEMINI_RPM
 
 # --------------------------------------------------------------------------- #
 # Zadani
 # --------------------------------------------------------------------------- #
 RESEARCH_SYSTEM = """\
-You are a sports research assistant. Use Google Search to collect FACTS about \
-upcoming matches. You give no predictions and no betting advice - only \
-verifiable, dated facts from the most recent sources you can find. Write in \
-Czech.\
+You are an experienced sports analyst preparing pre-match briefings for a \
+bettor. Use Google Search thoroughly - several searches per match (form, \
+injuries and team news, head-to-head, previews and predictions). Be concrete: \
+dates, scores, names, numbers. Never invent anything; say plainly what you \
+could not find. Write in Czech.\
 """
 
 RESEARCH_TASK = """\
-Today is {today}. Research each match below. For every match look for:
-- injuries, suspensions, illness, expected line-ups, key players rested,
-- the last ~5 results of both sides (with dates and scores) and recent head-to-head,
-- team sports: home and away record this season,
-- schedule: days of rest, travel, back-to-back games, an important match \
-coming next (rotation risk),
-- motivation: standings, what is at stake (playoffs, relegation, nothing),
-- tennis: surface, recent results on it, fitness, recent retirements or withdrawals,
-- weather if the match is outdoors and weather matters (e.g. baseball).
+Today is {today}. Prepare a pre-match briefing:
+{sport} | {competition} | {match} | starts {when} (Prague time)
+The market favourite is {pick}{draw}; bookmakers give it about {prob} %.
 
-Output format, for each match exactly:
-### <id> <home> vs <away>
-- <fact with date> (<source name>)
-- ...
-- Nenalezeno: <what you could not find>
+Cover as much as you can find:
+1. Current form: last 5-10 results of both sides with dates and scores, the \
+trend and the quality of the opponents they faced.
+2. Team news: injuries, suspensions, illness, rest or rotation, expected \
+line-ups; in tennis fitness, recent retirements or withdrawals.
+3. Head-to-head: recent meetings, scores, and on this surface or venue.
+4. Style match-up: how both sides play and why that helps or hurts the \
+favourite (pace, defence, rebounding, serve and return, surface fit...).
+5. Context: standings and motivation, what is at stake, schedule and rest \
+days, travel, back-to-back games, home and away records this season.
+6. Conditions: surface, indoor or outdoor, altitude; weather for outdoor events.
+7. What previews, experts and tipsters expect (name the source) and how the \
+odds have moved, if you find it.
+8. Summary: the 2-3 strongest reasons the favourite wins and the 2-3 biggest \
+risks of an upset.
 
-3 to 8 bullet points per match, concrete and short. Never guess - if you did \
-not find something, put it under "Nenalezeno".
-
-Matches:
-{matches}\
+Mark anything uncertain or older than a few weeks. 250-450 words.\
 """
 
 COMMON_RULES = """\
@@ -321,7 +323,7 @@ class GeminiAgent:
 
 
 # --------------------------------------------------------------------------- #
-# Resers
+# Resers -- kazdy zapas zvlast, jako rozbor pred zapasem
 # --------------------------------------------------------------------------- #
 @dataclass
 class Dossier:
@@ -331,28 +333,33 @@ class Dossier:
     queries: list[str] = field(default_factory=list)
 
 
-def research_band(
-    gemini: GeminiClient, band: str, tips: list[Tip], cfg: Config, now: datetime
+def research_match(
+    gemini: GeminiClient, cid: str, tip: Tip, cfg: Config, now: datetime
 ) -> Dossier:
-    matches = "\n".join(
-        f"{band}{i} | {match_name(t)} | {t.event.sport_title} | "
-        f"{t.event.commence_time.astimezone(cfg.tz):%d.%m. %H:%M}"
-        for i, t in enumerate(tips, start=1))
+    ev = tip.event
     prompt = RESEARCH_TASK.format(
-        today=f"{now.astimezone(cfg.tz):%A %d.%m.%Y}", matches=matches)
+        today=f"{now.astimezone(cfg.tz):%A %d.%m.%Y}",
+        sport=SPORT_CS.get(ev.sport_group, ev.sport_group or ev.sport_key),
+        competition=ev.sport_title,
+        match=match_name(tip),
+        when=f"{ev.commence_time.astimezone(cfg.tz):%d.%m. %H:%M}",
+        pick=tip.pick_team,
+        prob=f"{tip.prob * 100:.0f}",
+        draw=" (a draw would lose the tip)" if tip.has_draw else "",
+    )
     try:
         reply = gemini.generate(
             [{"role": "user", "parts": [{"text": prompt}]}],
             system=RESEARCH_SYSTEM, search=True, max_tokens=cfg.gemini_max_tokens)
     except GeminiError as exc:
-        log.warning("Resers pasma %s selhala: %s", band, exc)
-        return Dossier(text="(Resers pro toto pasmo selhala -- zadna data z webu.)",
+        log.warning("Resers %s (%s) selhala: %s", cid, match_name(tip), exc)
+        return Dossier(text="(Resers k tomuto zapasu selhala -- zadna data z webu.)",
                        ok=False)
     text = reply.text
-    if len(text) > MAX_DOSSIER_CHARS:
-        text = text[:MAX_DOSSIER_CHARS].rstrip() + "\n[...zkraceno]"
-    log.info("Resers pasma %s: %s znaku, %s dotazu, %s zdroju.",
-             band, len(reply.text), len(reply.queries), len(reply.sources))
+    if len(text) > MAX_MATCH_CHARS:
+        text = text[:MAX_MATCH_CHARS].rstrip() + "\n[...zkraceno]"
+    log.info("Resers %s (%s): %s znaku, %s dotazu, %s zdroju.",
+             cid, match_name(tip), len(reply.text), len(reply.queries), len(reply.sources))
     return Dossier(text=text, ok=True, sources=reply.sources, queries=reply.queries)
 
 
@@ -368,10 +375,13 @@ def opening_prompt(
         lo, hi = cfg.odds_bands[ord(band) - ord("A")]
         parts.append(f"\n=== BAND {band} (typical odds "
                      f"{band_range_text(lo, hi, decimal_comma=False)}) ===")
-        parts += [describe(f"{band}{i}", t, cfg) for i, t in enumerate(tips, start=1)]
-        parts.append(f"\nResearch dossier for band {band}:\n{dossiers[band].text}")
+        for i, tip in enumerate(tips, start=1):
+            cid = f"{band}{i}"
+            parts.append("\n" + describe(cid, tip, cfg))
+            parts.append(f"Research dossier for {cid}:\n{dossiers[cid].text}")
     parts.append("\nTASK: give your independent opening verdict for every band "
-                 "above (reply_to_opponent = empty string).")
+                 "above (reply_to_opponent = empty string). A band with a single "
+                 "candidate still needs your honest estimate and argument.")
     return "\n".join(parts)
 
 
@@ -384,18 +394,35 @@ def _format_verdict(verdict: BandVerdict) -> str:
     return "\n".join(lines)
 
 
+def _pick_text(verdict: BandVerdict) -> str:
+    pick = verdict.pick()
+    safety = verdict.ratings[pick].safety
+    return f"{pick} ({safety} %)" if safety is not None else pick
+
+
+def agreed(g: BandVerdict, c: BandVerdict, gap: int) -> bool:
+    """Shoda = stejne 1. misto A odhady jeho sance se lisi nejvys o `gap` bodu."""
+    if g.pick() != c.pick():
+        return False
+    gs, cs = g.ratings[g.pick()].safety, c.ratings[c.pick()].safety
+    return gs is not None and cs is not None and abs(gs - cs) <= gap
+
+
 def turn_prompt(
     disputed: list[str],
     own: dict[str, BandVerdict],
     opponent: dict[str, BandVerdict],
     opponent_name: str,
+    gap: int,
     last: bool,
 ) -> str:
-    parts = [f"{opponent_name} disagrees with you about the safest pick in "
-             f"band(s) {', '.join(disputed)}. Their latest verdict:"]
+    parts = [f"{opponent_name} disagrees with you in band(s) {', '.join(disputed)} - "
+             "either about the safest pick or about how safe it is (your estimates "
+             f"for the pick differ by more than {gap} points). Their latest verdict:"]
     for band in disputed:
         opp = opponent[band]
-        parts.append(f"\nBAND {band} - their pick {opp.pick()}, yours {own[band].pick()}.")
+        parts.append(f"\nBAND {band} - their pick {_pick_text(opp)}, "
+                     f"yours {_pick_text(own[band])}.")
         parts.append(_format_verdict(opp))
         if opp.reply:
             parts.append(f"  Their reply to you: {opp.reply}")
@@ -403,9 +430,9 @@ def turn_prompt(
         "\nAnswer their strongest argument directly in reply_to_opponent "
         "(Czech, max ~300 characters) and give your updated ratings for ALL "
         f"candidates of band(s) {', '.join(disputed)} only.\n"
-        "- Change your ranking only if they named a concrete fact or reasoning "
-        "you missed or misjudged. Giving in just to reach agreement is a failure "
-        "- and so is ignoring a good argument.\n"
+        "- Change your ranking or estimate only if they named a concrete fact or "
+        "reasoning you missed or misjudged. Giving in just to reach agreement is "
+        "a failure - and so is ignoring a good argument.\n"
         "- Point to specific facts from the dossier.")
     if last:
         parts.append("- This is the LAST exchange. If you still disagree, the "
@@ -424,8 +451,8 @@ def skip_reason(
             return "chybi ANTHROPIC_API_KEY"
         if not cfg.gemini_api_key:
             return "chybi GEMINI_API_KEY"
-    if not any(len(tips) >= 2 for tips in pool.values()):
-        return "v zadnem pasmu nejsou aspon 2 zapasy, neni co radit"
+    if not any(pool.values()):
+        return "v pasmech neni zadny zapas"
     return None
 
 
@@ -454,21 +481,25 @@ def run_debate(
         log.info("AI debata preskocena: %s.", reason)
         return None
 
-    debated = {band: tips for band, tips in pool.items() if len(tips) >= 2}
+    debated = {band: tips for band, tips in pool.items() if tips}
     band_ids = {band: [f"{band}{i}" for i in range(1, len(tips) + 1)]
                 for band, tips in debated.items()}
+    gap = cfg.ai_agree_gap
     claude = gemini_agent = None
     try:
         gemini = gemini_client or GeminiClient(
-            cfg.gemini_api_key, cfg.gemini_model, timeout=cfg.gemini_timeout)
+            cfg.gemini_api_key, cfg.gemini_model, timeout=cfg.gemini_timeout,
+            min_interval=60.0 / cfg.gemini_rpm)
         claude = ClaudeAgent(claude_client or make_anthropic_client(cfg), cfg)
         gemini_agent = GeminiAgent(gemini)
 
-        # 1) resers -- pasma paralelne
-        with ThreadPoolExecutor(max_workers=len(debated)) as ex:
-            futures = {band: ex.submit(research_band, gemini, band, tips, cfg, now)
-                       for band, tips in debated.items()}
-            dossiers = {band: fut.result() for band, fut in futures.items()}
+        # 1) resers -- kazdy zapas zvlast; tempo hlida GeminiClient (GEMINI_RPM)
+        matches = {f"{band}{i}": tip for band, tips in debated.items()
+                   for i, tip in enumerate(tips, start=1)}
+        with ThreadPoolExecutor(max_workers=RESEARCH_WORKERS) as ex:
+            futures = {cid: ex.submit(research_match, gemini, cid, tip, cfg, now)
+                       for cid, tip in matches.items()}
+            dossiers = {cid: fut.result() for cid, fut in futures.items()}
 
         # 2) uvodni verdikty -- nezavisle, zaroven
         prompt = opening_prompt(debated, dossiers, cfg, now)
@@ -485,7 +516,8 @@ def run_debate(
             ("Gemini", "uvodni verdikt", {b: g_now[b] for b in band_ids}),
             ("Claude", "uvodni verdikt", {b: c_now[b] for b in band_ids}),
         ]
-        agreed_at: dict[str, int] = {b: 0 for b in band_ids if g_now[b].pick() == c_now[b].pick()}
+        agreed_at: dict[str, int] = {
+            b: 0 for b in band_ids if agreed(g_now[b], c_now[b], gap)}
 
         # 3) debata -- stridave, jen o pasmech bez shody
         speakers = [(gemini_agent, g_now, c_now, "Claude"),
@@ -495,14 +527,14 @@ def run_debate(
             if not disputed:
                 break
             agent, own, opponent, opp_name = speakers[(turn - 1) % 2]
-            raw = agent.ask(turn_prompt(disputed, own, opponent, opp_name,
+            raw = agent.ask(turn_prompt(disputed, own, opponent, opp_name, gap,
                                         last=turn == cfg.ai_max_turns))
             update, turn_notes = parse_verdict(raw, {b: band_ids[b] for b in disputed})
             notes += [f"{agent.name} (odpoved {turn}): {n}" for n in turn_notes]
             own.update(update)      # pasmo, ktere agent vynechal, zustava beze zmeny
             log_rows.append((agent.name, f"odpoved {turn}", {b: own[b] for b in disputed}))
             for band in disputed:
-                if g_now[band].pick() == c_now[band].pick():
+                if agreed(g_now[band], c_now[band], gap):
                     agreed_at[band] = turn
                     log.info("AI debata: pasmo %s -- shoda na %s po %s. odpovedi.",
                              band, g_now[band].pick(), turn)
@@ -548,22 +580,20 @@ def _decide(
     consensus: dict[str, bool] = {}
     for band, tips in pool.items():
         ids = [f"{band}{i}" for i in range(1, len(tips) + 1)]
-        if band not in g:          # 0-1 kandidat: nebylo o cem debatovat
+        if band not in g:          # prazdne pasmo
             order[band] = ids
-            for rank, cid in enumerate(ids, start=1):
-                verdicts[cid] = AIVerdict(rank=rank, reason="", confidence="")
             continue
 
         def score(cid: str) -> float:
             return _avg(g[band].ratings[cid].safety, c[band].ratings[cid].safety)
 
         ranked = sorted(ids, key=lambda cid: (-score(cid), int(cid[1:])))
-        agreed = band in agreed_at
-        if agreed:
+        is_agreed = band in agreed_at
+        if is_agreed:
             pick = g[band].pick()
             ranked.remove(pick)
             ranked.insert(0, pick)
-        consensus[band] = agreed
+        consensus[band] = is_agreed
         order[band] = ranked
 
         for rank, cid in enumerate(ranked, start=1):
@@ -574,7 +604,7 @@ def _decide(
             argument = cr.argument or gr.argument
             reason = f"{est}: {argument}" if est and argument else (est or argument)
             if rank == 1:
-                confidence = AGREED if agreed else DISPUTED
+                confidence = AGREED if is_agreed else DISPUTED
             else:
                 confidence = THIN if THIN in (gr.evidence, cr.evidence) else SOLID
             verdicts[cid] = AIVerdict(rank=rank, reason=reason, confidence=confidence)
@@ -593,24 +623,28 @@ def _transcript(
     local = now.astimezone(cfg.tz)
     out = [f"# Debata {local:%d.%m.%Y}",
            "",
-           f"Resers: {cfg.gemini_model} s vyhledavanim Google. "
+           f"Resers: {cfg.gemini_model} s vyhledavanim Google, kazdy zapas zvlast. "
            f"Analytik: {cfg.gemini_model}. Skeptik: {cfg.ai_model}. "
+           f"Shoda = stejne 1. misto a odhady nejvys {cfg.ai_agree_gap} bodu od sebe. "
            f"Nejvys {cfg.ai_max_turns} odpovedi po uvodnich verdiktech."]
     for band, tips in pool.items():
-        if band not in dossiers:
+        if band not in ranking.consensus:
             continue
         out += ["", f"## Pasmo {band}", "", "| id | zapas | tip | trh |", "|---|---|---|---|"]
         out += [f"| {band}{i} | {match_name(t)} | {t.selection} | {t.prob * 100:.1f} % |"
                 for i, t in enumerate(tips, start=1)]
-        d = dossiers[band]
-        out += ["", "### Resers", "", d.text]
-        if d.sources:
-            out += ["", "Zdroje: " + ", ".join(f"[{title}]({uri})" for title, uri in d.sources[:15])]
+        for i, tip in enumerate(tips, start=1):
+            cid = f"{band}{i}"
+            d = dossiers[cid]
+            out += ["", f"### Resers {cid}: {match_name(tip)}", "", d.text]
+            if d.sources:
+                out += ["", "Zdroje: " + ", ".join(
+                    f"[{title}]({uri})" for title, uri in d.sources[:10])]
         for who, label, verdicts in rows:
             if band not in verdicts:
                 continue
             v = verdicts[band]
-            out += ["", f"### {who} -- {label} (1. misto: {v.pick()})"]
+            out += ["", f"### {who} -- {label} (1. misto: {_pick_text(v)})"]
             if v.reply:
                 out += ["", f"> {v.reply}"]
             out += [""] + [f"- **{cid}** {v.ratings[cid].safety if v.ratings[cid].safety is not None else '?'} %"
