@@ -813,9 +813,11 @@ class FakeGemini:
     """Falesny GeminiClient: resers (search=True) a odpovedi v debate postupne."""
 
     def __init__(self, *payloads, research="- fakt z webu (zdroj)",
-                 research_error=None, error=None, text=None, no_search=0):
+                 research_error=None, error=None, text=None, no_search=0,
+                 never_search=None):
         self.payloads, self.research = list(payloads), research
         self.no_search = no_search          # kolik reserse probehne bez hledani
+        self.never_search = never_search    # u zapasu s timto textem nehleda nikdy
         self.research_error, self.error, self.text = research_error, error, text
         self.calls: list[dict] = []
         self.debate_calls = 0
@@ -829,6 +831,9 @@ class FakeGemini:
         if search:
             if self.research_error:
                 raise self.research_error
+            prompt_text = contents[0]["parts"][0]["text"]
+            if self.never_search and self.never_search in prompt_text:
+                return GeminiReply(text="z pameti: tym neexistuje")
             if self.no_search > 0:
                 self.no_search -= 1
                 return GeminiReply(text="z pameti: tym neexistuje")
@@ -1075,14 +1080,15 @@ def test_ai_ranking() -> None:
           all(c["model"] == cfg.gemini_research_model for c in research_ns))
     check("bez hledani se resers zopakuje s duraznym pokynem",
           len(research_ns) == 9
-          and "did not use Google Search" in research_ns[1]["contents"][0]["parts"][0]["text"])
+          and sum("did not use Google Search" in c["contents"][0]["parts"][0]["text"]
+                  for c in research_ns) == 1)
     check("po opakovani se pouzije nalezeny rozbor",
           r_ns is not None and "z pameti" not in r_ns.transcript)
     _, pool_ns2 = ai_pool(cfg)
     r_ns2 = ai_debate.run_debate(
         pool_ns2, cfg, now,
         gemini_client=FakeGemini(verdict({"A": AGREE_A, "B": AGREE_B, "C": AGREE_C}),
-                                 no_search=ai_debate.RESEARCH_ATTEMPTS),
+                                 never_search=pool_ns2["A"][0].pick_team),
         claude_client=FakeAI(verdict({"A": AGREE_A, "B": AGREE_B, "C": AGREE_C})))
     check("rozbor z pameti (ani napodruhe nehledal) se zahodi",
           r_ns2 is not None and "z pameti" not in r_ns2.transcript
