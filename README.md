@@ -126,7 +126,7 @@ každého tipu přibude jen poznámka s odhady obou agentů a hlavním argumente
    program a únavu, povrch nebo počasí, co čekají preview a tipéři, a nakonec
    hlavní důvody pro favorita a rizika překvapení. Co nenašel, výslovně uvede.
    Vyhledávání je **vynucené** (model nesmí psát z paměti, ta je zastaralá)
-   a omezené na `OPENAI_MAX_SEARCHES` (4) hledání na zápas. Stejné podklady
+   a omezené na `OPENAI_MAX_SEARCHES` (6) hledání na zápas. Stejné podklady
    pak dostanou oba agenti.
 2. **Úvodní verdikty.** Každý agent nezávisle odhadne u každého kandidáta šanci
    na výhru (0–100 %) a napíše argument. Každý má jinou roli:
@@ -189,7 +189,7 @@ Oba klíče můžeš volitelně dát i do lokálního `.env`.
 ### Cena
 
 - **GPT** (`gpt-5-mini`: 0,25 / 2 USD za milion tokenů, hledání 0,01 USD):
-  rešerše ke každému zápasu (typicky 5–15 denně, nejvýš 4 hledání na zápas),
+  rešerše ke každému zápasu (typicky 5–15 denně, nejvýš 6 hledání na zápas),
   analytik 1–3 odpovědi. **Orientačně 6–10 USD měsíčně**, v plné sezóně
   s více zápasy až ~15. Většinu ceny tvoří hledání.
 - **Claude** (`claude-sonnet-5`, 2 / 10 USD za milion tokenů): úvodní verdikt
@@ -229,7 +229,8 @@ vrátí k pořadí podle kurzů a přestaneš za AI platit.
 | `AI_EFFORT` | `medium` | `low` / `medium` / `high`, hloubka uvažování obou agentů |
 | `OPENAI_RESEARCH_MODEL` | `gpt-5-mini` | model pro rešerši s vyhledáváním na webu |
 | `OPENAI_MODEL` | `gpt-5-mini` | model analytika v debatě |
-| `OPENAI_MAX_SEARCHES` | `4` | nejvýš hledání na webu na jeden zápas |
+| `OPENAI_MAX_SEARCHES` | `6` | nejvýš hledání na webu na jeden zápas |
+| `OPENAI_RESEARCH_EFFORT` | `medium` | `low` / `medium` / `high`, jak důkladně GPT rešerši promýšlí |
 
 
 ---

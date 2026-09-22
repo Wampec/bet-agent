@@ -225,7 +225,8 @@ class Config:
     openai_api_key: str = ""
     openai_model: str = "gpt-5-mini"            # analytik v debate
     openai_research_model: str = "gpt-5-mini"   # resers s vyhledavanim na webu
-    openai_max_searches: int = 4                # nejvys hledani na jeden zapas
+    openai_max_searches: int = 6                # nejvys hledani na jeden zapas
+    openai_research_effort: str = "medium"      # low | medium | high -- hloubka reserse
     openai_max_tokens: int = 16000
     openai_timeout: float = 180.0
 
@@ -287,6 +288,8 @@ class Config:
             problems.append("AI_AGREE_GAP musi byt 0 az 100")
         if not 1 <= self.openai_max_searches <= 20:
             problems.append("OPENAI_MAX_SEARCHES musi byt 1 az 20")
+        if self.openai_research_effort not in {"low", "medium", "high"}:
+            problems.append("OPENAI_RESEARCH_EFFORT musi byt low | medium | high")
         if not self.openai_research_model:
             problems.append("OPENAI_RESEARCH_MODEL nesmi byt prazdny")
         if not self.openai_model:
@@ -447,7 +450,8 @@ def load_config() -> Config:
         openai_api_key=_str("OPENAI_API_KEY"),
         openai_model=_str("OPENAI_MODEL", "gpt-5-mini"),
         openai_research_model=_str("OPENAI_RESEARCH_MODEL", "gpt-5-mini"),
-        openai_max_searches=_int("OPENAI_MAX_SEARCHES", 4),
+        openai_max_searches=_int("OPENAI_MAX_SEARCHES", 6),
+        openai_research_effort=_str("OPENAI_RESEARCH_EFFORT", "medium").lower(),
         openai_max_tokens=_int("OPENAI_MAX_TOKENS", 16000),
         openai_timeout=_float("OPENAI_TIMEOUT", 180.0),
         min_bookmakers=_int("MIN_BOOKMAKERS", 4),

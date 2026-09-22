@@ -85,7 +85,11 @@ odds have moved, if you find it.
 8. Summary: the 2-3 strongest reasons the favourite wins and the 2-3 biggest \
 risks of an upset.
 
-Mark anything uncertain or older than a few weeks. 250-450 words.\
+Mark anything uncertain or older than a few weeks. 250-450 words.
+This is a one-shot briefing read by another analyst, not a chat: write the \
+actual numbers, dates, scores and names you found. Never tell the reader to \
+look something up in a source and never offer to fetch more later - if you \
+did not find it, say so in one short line.\
 """
 
 SEARCH_NUDGE = """
@@ -374,7 +378,7 @@ def research_match(
             reply = gpt.generate(
                 [{"role": "user", "content": text}],
                 system=RESEARCH_SYSTEM, search=True, max_searches=cfg.openai_max_searches,
-                max_tokens=cfg.openai_max_tokens, effort="low",
+                max_tokens=cfg.openai_max_tokens, effort=cfg.openai_research_effort,
                 model=cfg.openai_research_model)
             if reply.queries:
                 break
