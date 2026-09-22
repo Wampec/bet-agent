@@ -61,6 +61,7 @@ from fetcher import (
 from notifier import (
     TelegramError,
     TelegramNotifier,
+    format_chat_prompt,
     format_quota_warning,
     format_tips,
 )
@@ -249,9 +250,9 @@ def settle_results(client: OddsAPIClient, tips: TipLog) -> int:
     return settled
 
 
-def _notify(notifier: TelegramNotifier, text: str) -> None:
+def _notify(notifier: TelegramNotifier, text: str, parse_mode: str = "MarkdownV2") -> None:
     try:
-        notifier.send(text)
+        notifier.send(text, parse_mode=parse_mode)
     except TelegramError as exc:
         log.error("Telegram: %s", exc)
 
@@ -349,6 +350,7 @@ def run(args: argparse.Namespace) -> int:
     # vyberu), nebo podle ciste sance. Zapasy mimo pasma (pod) se neposilaji,
     # ale ukladaji se kvuli porovnani.
     selected, extras, ai, ai_failed = choose_tips(result.tips, cfg, now)
+    more = more_candidates(result.tips, selected, cfg)
     if args.dry_run and ai is not None and ai.transcript:
         log.info("[DRY RUN] Prubeh debaty:\n%s", ai.transcript)
     shown_keys = {band_key(i) for i in range(len(cfg.odds_bands))}
@@ -367,6 +369,12 @@ def run(args: argparse.Namespace) -> int:
             for key, picked in extras.items()
             for tip in picked
         ]
+        # Dalsi kandidati pod hlavnimi tipy: vypisou se, ale do statistik ne.
+        to_store += [
+            to_sent_tip(tip, band=key, shown=False, now=now)
+            for key, picked in more.items()
+            for tip in picked
+        ]
         tips.add(to_store, local_day)
         tips.save()
         if ai is not None and ai.transcript:
@@ -381,9 +389,29 @@ def run(args: argparse.Namespace) -> int:
         now=now,
         ai_used=ai is not None,
         ai_failed=ai_failed,
+        more=more,
     )
     _notify(notifier, message)
+    if cfg.chat_prompt:
+        groups = {key: selected.get(key, []) + more.get(key, []) for key in shown_keys}
+        if any(groups.values()):
+            # Cisty text bez formatovani -- aby sel rovnou zkopirovat do chatu.
+            _notify(notifier, format_chat_prompt(groups, cfg, now), parse_mode="")
     return EXIT_OK
+
+
+def more_candidates(
+    tips: list[Tip], selected: dict[str, list[Tip]], cfg: Config
+) -> dict[str, list[Tip]]:
+    """Dalsi kandidati kazdeho pasma (az do LIST_PER_BAND), bez hlavnich tipu."""
+    wide = select_by_band(tips, cfg, limit=cfg.list_per_band)
+    more: dict[str, list[Tip]] = {}
+    for index in range(len(cfg.odds_bands)):
+        key = band_key(index)
+        chosen = selected.get(key, [])
+        rest = [t for t in wide.get(key, []) if not any(t is c for c in chosen)]
+        more[key] = rest[: max(0, cfg.list_per_band - len(chosen))]
+    return more
 
 
 def choose_tips(

@@ -95,7 +95,7 @@ jsou zařazené podle tehdy uloženého nejlepšího kurzu.
    chodí, dokud zápas nezačal (`MIN_MINUTES_BEFORE_START=0`).
 4. **Pásma a seřazení** — zápas se zařadí podle běžného kurzu a v každém pásmu
    se pošlou tři s nejvyšší šancí.
-5. **AI debata** (volitelné, viz níže): z až 5 kandidátů v pásmu vyberou
+5. **AI debata** (volitelná, výchozí vypnutá, viz níže): z kandidátů v pásmu vyberou
    GPT a Claude po rešerši na webu a vzájemné debatě tři „nejtutovější“.
 
 ### Jednu věc je fér vědět
@@ -111,7 +111,36 @@ Sázej jen peníze, které můžeš ztratit. Linka pomoci: **800 222 222**
 
 ---
 
+## Další kandidáti a text pro chat (zdarma)
+
+Pod třemi hlavními tipy pásma zpráva vypíše **další kandidáty** až do
+`LIST_PER_BAND` (10) zápasů na pásmo, každý na jeden řádek. Do statistik
+úspěšnosti se nepočítají (ukládají se potichu), takže čísla pásem zůstávají
+srovnatelná s historií.
+
+Hned za hlavní zprávou přijde **druhá zpráva s hotovým textem pro chat**: zadání
+pro AI a všechny vypsané zápasy (sport, soutěž, čas, tip, doma/venku, šance
+trhu, kurz). Zkopíruj ji celou do Gemini, Clauda nebo ChatGPT. AI v chatu
+vyhledá na webu formu, zranění, vzájemné zápasy a další podklady, seřadí zápasy
+v každém pásmu a vybere tři nejjistější. **Nic to nestojí.**
+
+```
+Jsi zkušený sportovní analytik. Dnes je 22.09.2026. …
+Úkol: 1. Ke každému zápasu vyhledej na webu … 3. Z každého pásma vyber 3 nejjistější tipy …
+
+PÁSMO C (kurz 1,25 a vys)
+C1 | Maria Sakkari – Linda Fruhvirtova | tenis, WTA Singapore Open | 22.09. 13:40 | tip: výhra Maria Sakkari | trh 78 % | kurz 1,25
+C2 | Chicago Sky – Toronto Tempo | basketbal, WNBA | 23.09. 02:00 | tip: výhra Chicago Sky, hraje doma | trh 68 % | kurz 1,40
+```
+
+Vypíná se `CHAT_PROMPT=false`.
+
+---
+
 ## AI debata o pořadí tipů
+
+**Výchozí stav: vypnuto** (`AI_RANKING=false`) — místo placené debaty se posílá
+text pro chat (viz výše). Zapnutí stojí asi 8–30 USD měsíčně podle sezóny.
 
 Volitelný krok mezi výpočtem šance a odesláním zprávy. Z každého pásma se vezme
 **až 5 kandidátů** místo 3 a o jejich pořadí se dohadují dva různí AI agenti.
@@ -221,7 +250,7 @@ vrátí k pořadí podle kurzů a přestaneš za AI platit.
 
 | Proměnná | Výchozí | Význam |
 |---|---|---|
-| `AI_RANKING` | `true` | zapnutí kroku (běží jen s oběma klíči) |
+| `AI_RANKING` | `false` | zapnutí kroku (běží jen s oběma klíči) |
 | `AI_POOL_PER_BAND` | `5` | kolik kandidátů z pásma jde do debaty |
 | `AI_MAX_TURNS` | `4` | nejvýš odpovědí v debatě po úvodních verdiktech |
 | `AI_AGREE_GAP` | `10` | shoda = stejné 1. místo a odhady nejvýš N bodů od sebe |
@@ -455,7 +484,9 @@ v `settings.env`.
 | Proměnná | Výchozí | Význam |
 |---|---|---|
 | `ODDS_BANDS` | `1.15-1.19,1.20-1.24,1.25+` | kurzová pásma; nesmí se překrývat, `1.25+` = bez horní hranice (jen poslední) |
-| `TIPS_PER_BAND` | `3` | kolik tipů v každém pásmu |
+| `TIPS_PER_BAND` | `3` | kolik hlavních tipů v každém pásmu (počítají se do statistik) |
+| `LIST_PER_BAND` | `10` | kolik zápasů na pásmo vypsat celkem (hlavní tipy + další kandidáti) |
+| `CHAT_PROMPT` | `true` | druhá zpráva s hotovým textem pro chat |
 | `VIRTUAL_STAKE` | `100` | sázka pro virtuální zisk ve statistikách |
 | `MIN_TIP_PROB` | `0.0` | tvrdý práh šance; `0` = bez prahu |
 | `SPORT_PROFILE` | `core` | `individual` \| `low_variance` \| `core` \| `wide` |

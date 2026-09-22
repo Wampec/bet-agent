@@ -200,6 +200,12 @@ class Config:
     odds_bands: tuple[tuple[float, float], ...] = (
         (1.15, 1.19), (1.20, 1.24), (1.25, math.inf))
     tips_per_band: int = 3
+    # Pod hlavnimi tipy se vypisou dalsi kandidati az do LIST_PER_BAND na pasmo
+    # (kratce, do statistik se nepocitaji -- ukladaji se potichu).
+    list_per_band: int = 10
+    # Druha zprava s hotovym textem pro chat (Gemini, Claude, ChatGPT...):
+    # vsechny vypsane zapasy + zadani. Zkopirujes a vlozis -- zdarma.
+    chat_prompt: bool = True
     # Sazka pro virtualni zisk ve statistikach. Neni to doporuceni vkladu,
     # jen spolecne meritko, aby slo pasma ferove porovnat.
     virtual_stake: float = 100.0
@@ -213,7 +219,7 @@ class Config:
     # zapas je v pasmu nejtutovejsi, nejvys AI_MAX_TURNS odpovedi. Vysledne
     # poradi pocita kod (ai_debate.py). Bez obou klicu (ANTHROPIC_API_KEY,
     # OPENAI_API_KEY) je krok neaktivni a tipy jdou podle ciste kurzoveho poradi.
-    ai_ranking: bool = True
+    ai_ranking: bool = False
     anthropic_api_key: str = ""
     ai_model: str = "claude-sonnet-5"
     ai_pool_per_band: int = 5
@@ -272,7 +278,9 @@ class Config:
             problems.append("MIN_TIP_PROB musi byt v intervalu [0, 1)")
         if self.virtual_stake <= 0:
             problems.append("VIRTUAL_STAKE musi byt > 0")
-        if self.ai_pool_per_band < self.tips_per_band:
+        if self.list_per_band < self.tips_per_band:
+            problems.append("LIST_PER_BAND musi byt >= TIPS_PER_BAND")
+        if self.ai_ranking and self.ai_pool_per_band < self.tips_per_band:
             problems.append(
                 "AI_POOL_PER_BAND musi byt >= TIPS_PER_BAND "
                 "(AI z nich vybira, tak musi mit z ceho)")
@@ -436,9 +444,11 @@ def load_config() -> Config:
         same_day_only=_bool("SAME_DAY_ONLY", False),
         odds_bands=_odds_bands(),
         tips_per_band=_int("TIPS_PER_BAND", 3),
+        list_per_band=_int("LIST_PER_BAND", 10),
+        chat_prompt=_bool("CHAT_PROMPT", True),
         virtual_stake=_float("VIRTUAL_STAKE", 100.0),
         min_tip_prob=_float("MIN_TIP_PROB", 0.0),
-        ai_ranking=_bool("AI_RANKING", True),
+        ai_ranking=_bool("AI_RANKING", False),
         anthropic_api_key=_str("ANTHROPIC_API_KEY"),
         ai_model=_str("AI_MODEL", "claude-sonnet-5"),
         ai_pool_per_band=_int("AI_POOL_PER_BAND", 5),

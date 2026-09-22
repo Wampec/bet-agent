@@ -878,7 +878,7 @@ AGREE_C = {"C1": 75}
 
 
 def ai_cfg(**overrides):
-    base = dict(anthropic_api_key="test-key", openai_api_key="o-key")
+    base = dict(anthropic_api_key="test-key", openai_api_key="o-key", ai_ranking=True)
     base.update(overrides)
     return make_cfg(**base)
 
@@ -1391,7 +1391,7 @@ def test_ai_message() -> None:
         return ""
 
     check("AI_POOL_PER_BAND mensi nez TIPS_PER_BAND se odchyti",
-          "AI_POOL_PER_BAND" in fails(ai_pool_per_band=2, tips_per_band=3))
+          "AI_POOL_PER_BAND" in fails(ai_ranking=True, ai_pool_per_band=2, tips_per_band=3))
     check("neznamy AI_EFFORT se odchyti", "AI_EFFORT" in fails(ai_effort="extreme"))
     check("prazdny AI_MODEL se odchyti", "AI_MODEL" in fails(ai_model=""))
     check("AI_MAX_TURNS mimo rozsah se odchyti", "AI_MAX_TURNS" in fails(ai_max_turns=11))
@@ -1404,6 +1404,70 @@ def test_ai_message() -> None:
           and not ai_cfg(openai_api_key="").ai_active
           and not ai_cfg(anthropic_api_key="").ai_active
           and not ai_cfg(ai_ranking=False).ai_active)
+
+
+def test_chat_prompt() -> None:
+    print("\n[13d] Vypis dalsich kandidatu a text pro chat")
+    import main as agent_main
+    from notifier import TelegramNotifier, format_chat_prompt
+    cfg = make_cfg(ai_ranking=False, list_per_band=4)
+    now = datetime.now(timezone.utc)
+    result, _ = ai_pool(cfg)
+    selected, _, _, _ = agent_main.choose_tips(result.tips, cfg, now)
+    more = agent_main.more_candidates(result.tips, selected, cfg)
+    check("hlavni tipy zustavaji 3", len(selected["A"]) == 3)
+    check("dalsi kandidati doplni pasmo do LIST_PER_BAND",
+          len(more["A"]) == 1 and more["A"][0].odds_rank == 4, f"({len(more['A'])})")
+    check("dalsi kandidati se neopakuji s hlavnimi tipy",
+          not any(m is s for m in more["A"] for s in selected["A"]))
+    check("pasmo bez dalsich kandidatu je prazdne", more["B"] == [] and more["C"] == [])
+
+    from state import BandStats
+    stats = {"A": BandStats(), "B": BandStats(), "C": BandStats()}
+    msg = format_tips(result, selected, stats, [], cfg, more=more)
+    check("zprava ukazuje dalsi kandidaty", "dalsi kandidati" in msg and "4\\. " in msg)
+    check("zprava s kandidaty se vejde do limitu", len(msg) <= 4096)
+
+    groups = {k: selected[k] + more[k] for k in "ABC"}
+    prompt = format_chat_prompt(groups, cfg, now)
+    print("\n----- nahled textu pro chat -----")
+    print(prompt)
+    print("----- konec nahledu -----")
+    check("text pro chat obsahuje vsechny zapasy",
+          all(f"{k}{i}" in prompt for k in "ABC" for i in range(1, len(groups[k]) + 1)))
+    check("text pro chat obsahuje zadani", "vyhledej na webu" in prompt
+          and "3 nejjistější" in prompt)
+    check("text pro chat uvadi sport, tip a sanci trhu",
+          "tenis" in prompt and "tip: výhra" in prompt and "trh " in prompt)
+    check("hazena: remiza = prohra", "remíza = prohra" in prompt)
+    check("desetinna carka v kurzu", "kurz 1,16" in prompt)
+    check("text pro chat je bez formatovani Telegramu", "\\" not in prompt and "*" not in prompt)
+
+    class Http:
+        def __init__(self):
+            self.payloads = []
+
+        def post(self, url, json=None, timeout=None):
+            self.payloads.append(json)
+            return SimpleNamespace(status_code=200, text="")
+
+    notifier = TelegramNotifier(cfg)
+    notifier._session = Http()
+    notifier.send("cisty text", parse_mode="")
+    check("cisty text se posila bez parse_mode",
+          "parse_mode" not in notifier._session.payloads[0])
+
+    def fails(**kwargs) -> str:
+        try:
+            make_cfg(**kwargs).validate(require_telegram=False)
+        except ConfigError as exc:
+            return str(exc)
+        return ""
+
+    check("LIST_PER_BAND mensi nez TIPS_PER_BAND se odchyti",
+          "LIST_PER_BAND" in fails(list_per_band=2))
+    check("bez AI se AI_POOL_PER_BAND nekontroluje",
+          fails(ai_ranking=False, ai_pool_per_band=1) == "")
 
 
 def test_scheduling() -> None:
@@ -1531,6 +1595,7 @@ def main() -> int:
     test_gpt_client()
     test_ai_tracking()
     test_ai_message()
+    test_chat_prompt()
     test_scheduling()
     test_settings_split()
     test_escaping()

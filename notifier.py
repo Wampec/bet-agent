@@ -13,6 +13,7 @@ from datetime import datetime
 
 import requests
 
+from ai_ranker import SPORT_CS
 from analyzer import AnalysisResult, Tip, band_key, band_range_text
 from config import Config
 from state import STATUS_LOST, STATUS_VOID, STATUS_WON, BandStats, SentTip
@@ -106,9 +107,10 @@ class TelegramNotifier:
         payload = {
             "chat_id": self.cfg.telegram_chat_id,
             "text": text,
-            "parse_mode": parse_mode,
             "disable_web_page_preview": True,
         }
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
 
         last_error = ""
         for attempt in range(1, self.cfg.http_retries + 1):
@@ -130,7 +132,7 @@ class TelegramNotifier:
                 # Nejcasteji spatny escape -- zkusime jeste jednou bez formatovani.
                 log.warning("Telegram odmitl formatovani (%s), posilam jako text.",
                             last_error)
-                payload["parse_mode"] = ""
+                payload.pop("parse_mode", None)
                 payload["text"] = _strip_md(text)
                 parse_mode = ""
                 continue
@@ -210,6 +212,15 @@ def _tip_lines(position: int, tip: Tip, cfg: Config, now: datetime) -> list[str]
     return lines
 
 
+def _more_line(position: int, tip: Tip, cfg: Config, now: datetime) -> str:
+    """Dalsi kandidat pasma -- jeden kratky radek."""
+    icon = SPORT_ICONS.get(tip.event.sport_group, "\U0001f3c5")
+    draw = " · remiza \\= prohra" if tip.has_draw else ""
+    return (f"   {esc(position)}\\. {esc(tip.selection)} — {_pct(tip.prob, 0)} · "
+            f"{_num(tip.typical_odds)} · {icon} "
+            f"{esc(_when(tip.event.commence_time, cfg, now))}{draw}")
+
+
 def _shorten(text: str, limit: int) -> str:
     text = " ".join(text.split())
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
@@ -235,8 +246,9 @@ def format_tips(
     now: datetime | None = None,
     ai_used: bool = False,
     ai_failed: bool = False,
+    more: dict[str, list[Tip]] | None = None,
 ) -> str:
-    """Denni zprava: rekapitulace + tipy po kurzovych pasmech."""
+    """Denni zprava: rekapitulace + tipy po kurzovych pasmech (+ dalsi kandidati)."""
     now = now or datetime.now(cfg.tz)
     lines = [f"\U0001f3af *TIPY NA {esc(now.astimezone(cfg.tz).strftime('%d.%m.'))}*"]
 
@@ -252,6 +264,11 @@ def format_tips(
             lines.append("    dnes nic v tomto pasmu")
         for position, tip in enumerate(tips, start=1):
             lines += _tip_lines(position, tip, cfg, now)
+        extra = (more or {}).get(key, [])
+        if extra:
+            lines.append("  _dalsi kandidati \\(do statistik se nepocitaji\\):_")
+            lines += [_more_line(len(tips) + i, tip, cfg, now)
+                      for i, tip in enumerate(extra, start=1)]
         if len(tips) > 1:
             combined = 1.0
             for tip in tips:
@@ -277,6 +294,60 @@ def format_tips(
     lines.append(esc(f"Virtualne = zisk pri {cfg.virtual_stake:.0f} Kc "
                      "na kazdy tip, jen pro srovnani pasem."))
     return "\n".join(lines)
+
+
+CHAT_INTRO = """\
+Jsi zkušený sportovní analytik. Dnes je {today}. Níže jsou zápasy s jasným \
+favoritem, rozdělené do kurzových pásem. U každého je tip (výhra favorita), \
+šance favorita podle sázkových kanceláří (po odečtení marže) a běžný kurz.
+
+Úkol:
+1. Ke každému zápasu vyhledej na webu aktuální informace: forma a poslední \
+výsledky (s daty a skóre), zranění a sestavy, vzájemné zápasy, herní styl \
+a jak sedí na soupeře, tabulka a motivace, program a únava, povrch nebo \
+počasí, co čekají preview a tipéři.
+2. V každém pásmu seřaď zápasy od nejtutovějšího (nejvyšší šance, že favorit \
+opravdu vyhraje). U každého napiš svůj odhad šance v % a 1-2 věty proč.
+3. Z každého pásma vyber 3 nejjistější tipy. Kde nemáš dost informací, řekni \
+to, nic si nevymýšlej. Kurzy trhu ber jako silný výchozí bod.
+"""
+
+
+def format_chat_prompt(
+    groups: dict[str, list[Tip]], cfg: Config, now: datetime | None = None
+) -> str:
+    """
+    Hotovy text pro chat (Gemini, Claude, ChatGPT...) -- vsechny vypsane zapasy
+    po pasmech + zadani. Cisty text bez formatovani, aby se dal rovnou
+    zkopirovat. `groups` = pasmo -> zapasy (hlavni tipy i dalsi kandidati).
+    """
+    now = now or datetime.now(cfg.tz)
+    local = now.astimezone(cfg.tz)
+    lines = [CHAT_INTRO.format(today=local.strftime("%d.%m.%Y"))]
+    for index in range(len(cfg.odds_bands)):
+        key = band_key(index)
+        tips = groups.get(key, [])
+        if not tips:
+            continue
+        lo, hi = cfg.odds_bands[index]
+        lines.append(f"PÁSMO {key} (kurz {band_range_text(lo, hi)})")
+        for position, tip in enumerate(tips, start=1):
+            ev = tip.event
+            if ev.is_tennis:
+                venue = ""
+            elif tip.pick_team == ev.home_team:
+                venue = ", hraje doma"
+            else:
+                venue = ", hraje venku"
+            draw = ", remíza = prohra" if tip.has_draw else ""
+            start = ev.commence_time.astimezone(cfg.tz).strftime("%d.%m. %H:%M")
+            lines.append(
+                f"{key}{position} | {ev.home_team} – {ev.away_team} | "
+                f"{SPORT_CS.get(ev.sport_group, ev.sport_group)}, {ev.sport_title} | "
+                f"{start} | tip: výhra {tip.pick_team}{venue}{draw} | "
+                f"trh {tip.prob * 100:.0f} % | kurz {f'{tip.typical_odds:.2f}'.replace('.', ',')}")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def format_quota_warning(remaining: int, cfg: Config) -> str:
