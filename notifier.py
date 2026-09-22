@@ -267,8 +267,8 @@ def format_tips(
     lines.append("")
     if ai_used:
         lines.append(esc(
-            "Poradi urcila debata AI: Gemini (s resersi na webu) x Claude. "
-            "G/C = jejich odhad sance. 🤝 = shoda na 1. miste, "
+            "Poradi urcila debata AI: GPT (s resersi na webu) x Claude, "
+            "cisla = jejich odhad sance. 🤝 = shoda, "
             "⚠️ = neshodli se, rozhodl prumer, ❔ = malo dat."))
     if ai_failed:
         lines.append(esc(

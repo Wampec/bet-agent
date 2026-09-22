@@ -96,7 +96,7 @@ jsou zařazené podle tehdy uloženého nejlepšího kurzu.
 4. **Pásma a seřazení** — zápas se zařadí podle běžného kurzu a v každém pásmu
    se pošlou tři s nejvyšší šancí.
 5. **AI debata** (volitelné, viz níže): z až 5 kandidátů v pásmu vyberou
-   Gemini a Claude po rešerši na webu a vzájemné debatě tři „nejtutovější“.
+   GPT a Claude po rešerši na webu a vzájemné debatě tři „nejtutovější“.
 
 ### Jednu věc je fér vědět
 
@@ -120,23 +120,25 @@ každého tipu přibude jen poznámka s odhady obou agentů a hlavním argumente
 
 **Jak debata probíhá:**
 
-1. **Rešerše.** Gemini s vyhledáváním Google připraví ke **každému zápasu
+1. **Rešerše.** GPT s vyhledáváním na webu připraví ke **každému zápasu
    zvlášť** rozbor jako před zápasem: formu s výsledky, zranění a sestavy,
    vzájemné zápasy, herní styl a jak sedí na soupeře, tabulku a motivaci,
    program a únavu, povrch nebo počasí, co čekají preview a tipéři, a nakonec
    hlavní důvody pro favorita a rizika překvapení. Co nenašel, výslovně uvede.
-   Stejné podklady pak dostanou oba agenti.
+   Vyhledávání je **vynucené** (model nesmí psát z paměti, ta je zastaralá)
+   a omezené na `OPENAI_MAX_SEARCHES` (4) hledání na zápas. Stejné podklady
+   pak dostanou oba agenti.
 2. **Úvodní verdikty.** Každý agent nezávisle odhadne u každého kandidáta šanci
    na výhru (0–100 %) a napíše argument. Každý má jinou roli:
-   - **Gemini = analytik.** Staví na datech: forma, vzájemné zápasy, doma
+   - **GPT = analytik.** Staví na datech: forma, vzájemné zápasy, doma
      a venku, program, tabulka. Velká jména na něj neplatí.
    - **Claude = skeptik.** Hledá, proč favorit prohraje: absence, rotace,
      únava, cestování, motivace, nevhodný herní styl, počasí, chybějící data.
 3. **Debata.** Shoda znamená **stejné 1. místo a odhady jeho šance nejvýš
    `AI_AGREE_GAP` (10) bodů od sebe**. Posuzuje se proto i pásmo s jediným
    zápasem: když jeden agent dá favoritovi 85 % a druhý 65 %, musí se
-   dohadovat. Kde shoda není, střídají se v odpovědích (Gemini, Claude,
-   Gemini…). Každý vidí soupeřovy odhady a argumenty a musí na nejsilnější
+   dohadovat. Kde shoda není, střídají se v odpovědích (GPT, Claude,
+   GPT…). Každý vidí soupeřovy odhady a argumenty a musí na nejsilnější
    z nich odpovědět. Názor smí změnit jen kvůli konkrétnímu faktu, ne proto,
    aby debata skončila. Debata končí shodou, nejpozději po `AI_MAX_TURNS` (4)
    odpovědích.
@@ -148,14 +150,13 @@ každého tipu přibude jen poznámka s odhady obou agentů a hlavním argumente
 🟢 PÁSMO A · kurz 1,15–1,19
 1. Carlos Alcaraz — 86,0 % · kurz 1,15
     🎾 ATP Peking · dnes 11:30 · proti Kvalifikant
-    🤝 G 90 % · C 87 %: Soupeř hrál včera tři hodiny kvalifikaci, Alcaraz odpočatý.
+    🤝 GPT 90 % · Claude 87 %: Soupeř hrál včera tři hodiny kvalifikaci, Alcaraz odpočatý.
 2. Boston Celtics — 81,1 % · kurz 1,21
     🏀 NBA · zítra 01:30 · proti Washington Wizards
-    ❔ G 82 % · C 78 %: O sestavě Celtics rešerše nic nenašla.
+    ❔ GPT 82 % · Claude 78 %: O sestavě Celtics rešerše nic nenašla.
 
-Pořadí určila debata AI: Gemini (s rešerší na webu) x Claude. G/C = jejich
-odhad šance. 🤝 = shoda na 1. místě, ⚠️ = neshodli se, rozhodl průměr,
-❔ = málo dat.
+Pořadí určila debata AI: GPT (s rešerší na webu) x Claude, čísla = jejich
+odhad šance. 🤝 = shoda, ⚠️ = neshodli se, rozhodl průměr, ❔ = málo dat.
 ```
 
 **Celý průběh debaty** (rešerše se zdroji, všechny odhady a odpovědi) se každý
@@ -177,32 +178,24 @@ Bez **obou** klíčů je krok neaktivní a tipy jdou podle kurzů jako dřív.
 3. Na GitHubu: *Settings → Secrets and variables → Actions → New repository
    secret* → název **`ANTHROPIC_API_KEY`**.
 
-**Google (Gemini), placená úroveň:**
-1. Na <https://aistudio.google.com> se přihlas účtem Google → *Get API key* →
-   *Create API key*.
-2. U projektu s klíčem zapni fakturaci (*Set up billing*) a přidej platební
-   kartu. Bezplatná úroveň nestačí: má jen 20 dotazů denně na model a rešerše
-   jich potřebuje víc.
-3. V [Google Cloud Console](https://console.cloud.google.com/billing) →
-   *Budgets & alerts* nastav rozpočet, např. 5 USD měsíčně, s upozorněním
-   e-mailem. Rozpočet jen upozorňuje, útratu nezastaví; počet dotazů ale
-   drží na uzdě agent sám (nejvýš ~25 denně).
-4. Na GitHubu stejně jako výše, název **`GEMINI_API_KEY`**.
+**OpenAI (GPT):**
+1. Na <https://platform.openai.com> si založ účet, v *Settings → Billing*
+   dobij kredit (stačí 10 USD) a v *Settings → Limits* nastav měsíční limit.
+2. *API keys → Create new secret key*. Klíč se zobrazí jen jednou.
+3. Na GitHubu stejně jako výše, název **`OPENAI_API_KEY`**.
 
 Oba klíče můžeš volitelně dát i do lokálního `.env`.
 
 ### Cena
 
-- **Gemini** (placená úroveň, `gemini-2.5-flash`: 0,30 / 2,50 USD za milion
-  tokenů): rešerše udělá jeden dotaz na zápas (typicky 5–15 denně), analytik
-  1–3 odpovědi. Vyhledávání Google je u modelů 2.5 zdarma do 1 500 dotazů
-  denně. **Orientačně 3–6 USD měsíčně.** Silnější `gemini-3.8-flash`
-  (`GEMINI_RESEARCH_MODEL`, `GEMINI_MODEL`) vyjde asi na dvojnásobek; u modelů
-  3.x je 5 000 vyhledávání měsíčně zdarma.
+- **GPT** (`gpt-5-mini`: 0,25 / 2 USD za milion tokenů, hledání 0,01 USD):
+  rešerše ke každému zápasu (typicky 5–15 denně, nejvýš 4 hledání na zápas),
+  analytik 1–3 odpovědi. **Orientačně 6–10 USD měsíčně**, v plné sezóně
+  s více zápasy až ~15. Většinu ceny tvoří hledání.
 - **Claude** (`claude-sonnet-5`, 2 / 10 USD za milion tokenů): úvodní verdikt
   a nejvýš 2 odpovědi denně. Úvodní zadání s rešerší jde do prompt cache, takže
   opakované čtení stojí desetinu. **Orientačně 2–4 USD měsíčně.** Přesná
-  spotřeba je v logu (`AI debata hotova: Claude … ~0.08 USD`).
+  spotřeba obou je v logu (`AI debata hotova: Claude … GPT … celkem ~0.30 USD`).
 
 ### Pomáhá to vůbec? Měří se to
 
@@ -233,10 +226,10 @@ vrátí k pořadí podle kurzů a přestaneš za AI platit.
 | `AI_MAX_TURNS` | `4` | nejvýš odpovědí v debatě po úvodních verdiktech |
 | `AI_AGREE_GAP` | `10` | shoda = stejné 1. místo a odhady nejvýš N bodů od sebe |
 | `AI_MODEL` | `claude-sonnet-5` | model skeptika |
-| `AI_EFFORT` | `medium` | `low` / `medium` / `high`, hloubka uvažování Clauda |
-| `GEMINI_RESEARCH_MODEL` | `gemini-2.5-flash` | model pro rešerši s vyhledáváním Google |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | model analytika v debatě |
-| `GEMINI_RPM` | `8` | kolik dotazů na Gemini za minutu |
+| `AI_EFFORT` | `medium` | `low` / `medium` / `high`, hloubka uvažování obou agentů |
+| `OPENAI_RESEARCH_MODEL` | `gpt-5-mini` | model pro rešerši s vyhledáváním na webu |
+| `OPENAI_MODEL` | `gpt-5-mini` | model analytika v debatě |
+| `OPENAI_MAX_SEARCHES` | `4` | nejvýš hledání na webu na jeden zápas |
 
 
 ---
@@ -299,9 +292,9 @@ main.py         denní běh: výsledky → nabídka → tipy → Telegram
 ├── config.py   načtení nastavení, sportovní profily, pásma, validace
 ├── fetcher.py  The Odds API: výběr soutěží, kurzy, výsledky
 ├── analyzer.py odstranění marže, konsensus, kontroly, pásma
-├── ai_debate.py volitelná AI debata o pořadí: rešerše + Gemini x Claude
+├── ai_debate.py volitelná AI debata o pořadí: rešerše + GPT x Claude
 ├── ai_ranker.py kandidáti pro AI a použití výsledného pořadí
-├── gemini.py   klient Gemini API (REST, vyhledávání Google)
+├── gpt.py      klient OpenAI Responses API (vyhledávání na webu)
 ├── notifier.py sestavení a odeslání zprávy (MarkdownV2)
 └── state.py    deník tipů a statistiky pásem
 
@@ -373,7 +366,9 @@ Počítač nemusí být zapnutý.
 - **Změna nastavení:** na GitHubu otevři `settings.env`, klikni na tužku, uprav
   (například `ODDS_BANDS`) a dole *Commit changes*. Platí od dalšího běhu.
 - **Ruční spuštění:** záložka *Actions* → *Denni tipy* → *Run workflow*.
-  Pro test zaškrtni „Poslat i když už dnes zpráva byla".
+  Pro test zaškrtni „Poslat i když už dnes zpráva byla". Volba „Jen zkouška“
+  projde celý běh včetně AI debaty, ale nic nepošle ani neuloží — výsledek
+  a průběh debaty jsou jen ve výpisu běhu.
 - **Když něco selže**, GitHub pošle e-mail. Podrobný výpis je u běhu v *Actions*.
 
 Lokální statistiky po přechodu: deník je na GitHubu, takže před

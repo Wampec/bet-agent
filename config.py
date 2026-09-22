@@ -208,11 +208,11 @@ class Config:
 
     # --- AI preporadani (debata dvou agentu) ------------------------------ #
     # Z kazdeho pasma se vezme AI_POOL_PER_BAND kandidatu (vic nez se zobrazi).
-    # Gemini k nim s vyhledavanim Google dohleda fakta (zraneni, forma, program,
-    # pocasi...). Pak se Gemini (analytik) a Claude (skeptik) dohaduji, ktery
+    # GPT k nim s vyhledavanim na webu dohleda fakta (zraneni, forma, program,
+    # pocasi...). Pak se GPT (analytik) a Claude (skeptik) dohaduji, ktery
     # zapas je v pasmu nejtutovejsi, nejvys AI_MAX_TURNS odpovedi. Vysledne
     # poradi pocita kod (ai_debate.py). Bez obou klicu (ANTHROPIC_API_KEY,
-    # GEMINI_API_KEY) je krok neaktivni a tipy jdou podle ciste kurzoveho poradi.
+    # OPENAI_API_KEY) je krok neaktivni a tipy jdou podle ciste kurzoveho poradi.
     ai_ranking: bool = True
     anthropic_api_key: str = ""
     ai_model: str = "claude-sonnet-5"
@@ -222,12 +222,12 @@ class Config:
     ai_timeout: float = 120.0
     ai_max_turns: int = 4              # odpovedi v debate po uvodnich verdiktech
     ai_agree_gap: int = 10             # shoda = stejne 1. misto a odhady do N bodu
-    gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"            # analytik v debate
-    gemini_research_model: str = "gemini-2.5-flash"   # resers s vyhledavanim
-    gemini_max_tokens: int = 16000
-    gemini_timeout: float = 180.0
-    gemini_rpm: int = 8                # dotazu za minutu (bezplatna uroven: 10)
+    openai_api_key: str = ""
+    openai_model: str = "gpt-5-mini"            # analytik v debate
+    openai_research_model: str = "gpt-5-mini"   # resers s vyhledavanim na webu
+    openai_max_searches: int = 4                # nejvys hledani na jeden zapas
+    openai_max_tokens: int = 16000
+    openai_timeout: float = 180.0
 
     # --- Spolehlivost odhadu ---------------------------------------------- #
     # Tohle nejsou filtry na "kvalitu sazky", ale na to, jestli se da odhadu
@@ -255,7 +255,7 @@ class Config:
     def ai_active(self) -> bool:
         """AI krok bezi jen kdyz je zapnuty A jsou k dispozici oba klice."""
         return (self.ai_ranking and bool(self.anthropic_api_key)
-                and bool(self.gemini_api_key))
+                and bool(self.openai_api_key))
 
     def validate(self, *, require_telegram: bool = True) -> None:
         problems: list[str] = []
@@ -285,12 +285,12 @@ class Config:
             problems.append("AI_MAX_TURNS musi byt 0 az 10")
         if not 0 <= self.ai_agree_gap <= 100:
             problems.append("AI_AGREE_GAP musi byt 0 az 100")
-        if self.gemini_rpm < 1:
-            problems.append("GEMINI_RPM musi byt >= 1")
-        if not self.gemini_research_model:
-            problems.append("GEMINI_RESEARCH_MODEL nesmi byt prazdny")
-        if not self.gemini_model:
-            problems.append("GEMINI_MODEL nesmi byt prazdny")
+        if not 1 <= self.openai_max_searches <= 20:
+            problems.append("OPENAI_MAX_SEARCHES musi byt 1 az 20")
+        if not self.openai_research_model:
+            problems.append("OPENAI_RESEARCH_MODEL nesmi byt prazdny")
+        if not self.openai_model:
+            problems.append("OPENAI_MODEL nesmi byt prazdny")
         problems += _band_problems(self.odds_bands)
         if self.devig_method not in {"shin", "multiplicative", "power"}:
             problems.append("DEVIG_METHOD musi byt shin | multiplicative | power")
@@ -444,12 +444,12 @@ def load_config() -> Config:
         ai_timeout=_float("AI_TIMEOUT", 120.0),
         ai_max_turns=_int("AI_MAX_TURNS", 4),
         ai_agree_gap=_int("AI_AGREE_GAP", 10),
-        gemini_api_key=_str("GEMINI_API_KEY"),
-        gemini_model=_str("GEMINI_MODEL", "gemini-2.5-flash"),
-        gemini_research_model=_str("GEMINI_RESEARCH_MODEL", "gemini-2.5-flash"),
-        gemini_max_tokens=_int("GEMINI_MAX_TOKENS", 16000),
-        gemini_timeout=_float("GEMINI_TIMEOUT", 180.0),
-        gemini_rpm=_int("GEMINI_RPM", 8),
+        openai_api_key=_str("OPENAI_API_KEY"),
+        openai_model=_str("OPENAI_MODEL", "gpt-5-mini"),
+        openai_research_model=_str("OPENAI_RESEARCH_MODEL", "gpt-5-mini"),
+        openai_max_searches=_int("OPENAI_MAX_SEARCHES", 4),
+        openai_max_tokens=_int("OPENAI_MAX_TOKENS", 16000),
+        openai_timeout=_float("OPENAI_TIMEOUT", 180.0),
         min_bookmakers=_int("MIN_BOOKMAKERS", 4),
         max_prob_dispersion=_float("MAX_PROB_DISPERSION", 0.04),
         devig_method=_str("DEVIG_METHOD", "shin").lower(),

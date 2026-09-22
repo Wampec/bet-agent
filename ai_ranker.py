@@ -1,7 +1,7 @@
 """
 ai_ranker.py -- spolecne casti AI preporadani kandidatu v pasmech.
 
-Samotne rozhodovani je v ai_debate.py (debata agentu Gemini a Claude).
+Samotne rozhodovani je v ai_debate.py (debata agentu GPT a Claude).
 Tady je to, co na zpusobu rozhodovani nezavisi: oznaceni kandidatu (A1, A2...),
 jejich popis pro AI, vysledne poradi (AIRanking) a jeho pouziti na tipy.
 

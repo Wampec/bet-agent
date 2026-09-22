@@ -17,6 +17,8 @@
 #
 # Rucni spusteni: zalozka Actions -> Denni tipy -> Run workflow.
 #   "Poslat i kdyz uz dnes zprava byla" = zapnout pro test.
+#   "Jen zkouska" = cely beh vcetne AI debaty, ale nic neposle ani neulozi
+#   (vysledek a prubeh debaty jsou jen v logu behu).
 
 name: Denni tipy
 
@@ -27,6 +29,10 @@ on:
     inputs:
       force:
         description: "Poslat i kdyz uz dnes zprava byla (pro test)"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Jen zkouska -- nic neposilat ani neukladat (vysledek v logu)"
         type: boolean
         default: false
 
@@ -73,10 +79,13 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           # Volitelne: bez obou klicu se AI debata preskoci.
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           FORCE: ${{ inputs.force }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          if [ "$FORCE" = "true" ]; then
+          if [ "$DRY_RUN" = "true" ]; then
+            python main.py --dry-run
+          elif [ "$FORCE" = "true" ]; then
             python main.py
           else
             python main.py --once-per-day --not-before 07:55

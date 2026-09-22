@@ -6,7 +6,7 @@ Postup:
   2. stahne dnesni nabidku vybranych sportu (den i nadchazejici noc),
   3. spocita sanci na vyhru favorita a seradi zapasy od nejjistejsiho,
   4. zaradi je do kurzovych pasem (ODDS_BANDS); s AI se o poradi v kazdem
-     pasmu dohadnou agenti Gemini a Claude (ai_debate.py),
+     pasmu dohadnou agenti GPT a Claude (ai_debate.py),
   5. v kazdem pasmu posle na Telegram TIPS_PER_BAND nejlepsich; zapasy mimo
      pasma ulozi potichu. Prubeh debaty ulozi do debaty/RRRR-MM-DD.md.
 
@@ -169,12 +169,12 @@ def print_status(tips: TipLog, cfg: Config) -> None:
               f"{s.profit:+8.0f}  {s.pending:>4}{tag}")
 
     if cfg.ai_active:
-        print(f"\nAI debata: zapnuto (Gemini {cfg.gemini_model} x Claude {cfg.ai_model}, "
+        print(f"\nAI debata: zapnuto (GPT {cfg.openai_model} x Claude {cfg.ai_model}, "
               f"{cfg.ai_pool_per_band} kandidatu na pasmo, "
               f"nejvys {cfg.ai_max_turns} odpovedi)")
     elif cfg.ai_ranking:
         missing = [name for name, value in (("ANTHROPIC_API_KEY", cfg.anthropic_api_key),
-                                            ("GEMINI_API_KEY", cfg.gemini_api_key))
+                                            ("OPENAI_API_KEY", cfg.openai_api_key))
                    if not value]
         print(f"\nAI debata: neaktivni -- chybi {', '.join(missing)}")
     else:
@@ -349,6 +349,8 @@ def run(args: argparse.Namespace) -> int:
     # vyberu), nebo podle ciste sance. Zapasy mimo pasma (pod) se neposilaji,
     # ale ukladaji se kvuli porovnani.
     selected, extras, ai, ai_failed = choose_tips(result.tips, cfg, now)
+    if args.dry_run and ai is not None and ai.transcript:
+        log.info("[DRY RUN] Prubeh debaty:\n%s", ai.transcript)
     shown_keys = {band_key(i) for i in range(len(cfg.odds_bands))}
     local_day = now.astimezone(cfg.tz).strftime("%Y-%m-%d")
 
@@ -385,12 +387,12 @@ def run(args: argparse.Namespace) -> int:
 
 
 def choose_tips(
-    tips: list[Tip], cfg: Config, now: datetime, ai_client=None, gemini_client=None
+    tips: list[Tip], cfg: Config, now: datetime, ai_client=None, gpt_client=None
 ) -> tuple[dict[str, list[Tip]], dict[str, list[Tip]], AIRanking | None, bool]:
     """
     Vrati (vybrane, navic, verdikt AI, ai_selhala).
 
-    S AI: z kazdeho pasma se vezme AI_POOL_PER_BAND kandidatu, agenti Gemini a
+    S AI: z kazdeho pasma se vezme AI_POOL_PER_BAND kandidatu, agenti GPT a
     Claude se dohadnou o poradi a do zpravy jde TIPS_PER_BAND nejlepsich.
     `navic` jsou tipy, ktere by podle ciste sance sly do zpravy, ale debata je
     vyradila (ukladaji se potichu).
@@ -398,16 +400,16 @@ def choose_tips(
     verdikt None. AI tak nikdy nezpusobi, ze zprava nedorazi.
     `ai_selhala` je True, kdyz se AI spustit mela, ale nepovedlo se to -- zprava
     to pak uzivateli rekne, aby nehledal poznamky, ktere tam nejsou.
-    Klienty (ai_client, gemini_client) predavaji jen testy.
+    Klienty (ai_client, gpt_client) predavaji jen testy.
     """
     bands = [band_key(i) for i in range(len(cfg.odds_bands))]
-    injected = ai_client is not None and gemini_client is not None
+    injected = ai_client is not None and gpt_client is not None
     if cfg.ai_ranking and (cfg.ai_active or injected):
         wide = select_by_band(tips, cfg, limit=cfg.ai_pool_per_band)
         pool = {key: wide[key] for key in bands}
         expected = ai_skip_reason(pool, cfg, injected) is None
         ranking = run_debate(pool, cfg, now, claude_client=ai_client,
-                             gemini_client=gemini_client)
+                             gpt_client=gpt_client)
         if ranking is not None:
             chosen, extras = apply_ai_order(pool, ranking, cfg)
             log_verdicts(pool, ranking)
