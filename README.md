@@ -183,10 +183,12 @@ Oba klíče můžeš volitelně dát i do lokálního `.env`.
 
 ### Cena
 
-- **Gemini:** bezplatná úroveň. Vyhledávání Google je pro modely Gemini 3.x
-  zdarma do 5 000 dotazů měsíčně a rešerše jich spotřebuje zhruba 30–60 denně.
-  Pozor: v bezplatné úrovni smí Google data z dotazů použít ke zlepšování
-  svých modelů. Tady jde jen o veřejné údaje o zápasech.
+- **Gemini:** bezplatná úroveň, model `gemini-2.5-flash`. Bezplatné vyhledávání
+  Google (grounding) mají jen modely 2.5 Flash a 2.5 Flash-Lite — 500 dotazů
+  denně, sdíleně mezi nimi; rešerše jich spotřebuje zhruba 5–15 denně. Modely
+  Gemini 3.x bezplatné vyhledávání vůbec nemají, proto se nepoužívají. Pozor:
+  v bezplatné úrovni smí Google data z dotazů použít ke zlepšování svých
+  modelů. Tady jde jen o veřejné údaje o zápasech.
 - **Claude** (`claude-sonnet-5`, 2 / 10 USD za milion tokenů): úvodní verdikt
   a nejvýš 2 odpovědi denně. Úvodní zadání s rešerší jde do prompt cache, takže
   opakované čtení stojí desetinu. **Orientačně 2–4 USD měsíčně.** Přesná
@@ -221,7 +223,7 @@ vrátí k pořadí podle kurzů a přestaneš za AI platit.
 | `AI_MAX_TURNS` | `4` | nejvýš odpovědí v debatě po úvodních verdiktech |
 | `AI_MODEL` | `claude-sonnet-5` | model skeptika |
 | `AI_EFFORT` | `medium` | `low` / `medium` / `high`, hloubka uvažování Clauda |
-| `GEMINI_MODEL` | `gemini-3.8-flash` | model pro rešerši a analytika |
+| `GEMINI_MODEL` | `gemini-2.5-flash` | model pro rešerši a analytika (bezplatné vyhledávání má jen 2.5 Flash/Flash-Lite) |
 
 
 ---

@@ -222,7 +222,7 @@ class Config:
     ai_timeout: float = 120.0
     ai_max_turns: int = 4              # odpovedi v debate po uvodnich verdiktech
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-3.8-flash"
+    gemini_model: str = "gemini-2.5-flash"
     gemini_max_tokens: int = 16000
     gemini_timeout: float = 180.0
 
@@ -435,7 +435,7 @@ def load_config() -> Config:
         ai_timeout=_float("AI_TIMEOUT", 120.0),
         ai_max_turns=_int("AI_MAX_TURNS", 4),
         gemini_api_key=_str("GEMINI_API_KEY"),
-        gemini_model=_str("GEMINI_MODEL", "gemini-3.8-flash"),
+        gemini_model=_str("GEMINI_MODEL", "gemini-2.5-flash"),
         gemini_max_tokens=_int("GEMINI_MAX_TOKENS", 16000),
         gemini_timeout=_float("GEMINI_TIMEOUT", 180.0),
         min_bookmakers=_int("MIN_BOOKMAKERS", 4),
