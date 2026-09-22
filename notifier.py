@@ -33,6 +33,13 @@ SPORT_ICONS = {
 }
 BAND_ICONS = ("\U0001f7e2", "\U0001f7e0", "\U0001f535", "\U0001f7e3")
 RESULT_ICONS = {STATUS_WON: "✅", STATUS_LOST: "❌", STATUS_VOID: "↩️"}
+# Znacka pred poznamkou AI (Tip.ai_confidence, viz ai_ranker.py).
+AI_MARKERS = {
+    "agreed": "🤝",      # 1. misto, agenti se shodli
+    "disputed": "⚠️",    # 1. misto, neshodli se -- rozhodl prumer odhadu
+    "thin": "❔",        # resers k zapasu skoro nic nenasla
+    "low": "❔",
+}
 
 
 class TelegramError(RuntimeError):
@@ -198,9 +205,8 @@ def _tip_lines(position: int, tip: Tip, cfg: Config, now: datetime) -> list[str]
         details.append(esc(tip.market_label))
     lines = [first, f"    {icon} " + " · ".join(details)]
     if tip.ai_reason:
-        # Otaznik = AI o tomhle zapase vi malo nebo jen zastarale.
-        marker = "❔" if tip.ai_confidence == "low" else "💬"
-        lines.append(f"    {marker} {esc(_shorten(tip.ai_reason, 150))}")
+        lines.append(f"    {AI_MARKERS.get(tip.ai_confidence, '💬')} "
+                     f"{esc(_shorten(tip.ai_reason, 220))}")
     return lines
 
 
@@ -260,15 +266,13 @@ def format_tips(
 
     lines.append("")
     if ai_used:
-        # Poctive: AI nema pristup k internetu, tak si nemuze byt jista dnesnimi
-        # zranenimi, pocasim ani formou -- a zprava to musi rict nahlas.
         lines.append(esc(
-            f"Poradi v pasmech upravila AI ({cfg.ai_model}) z vlastnich znalosti. "
-            "Nema zive udaje (zraneni, pocasi, aktualni forma). "
-            "❔ = o tomhle zapase vi malo."))
+            "Poradi urcila debata AI: Gemini (s resersi na webu) x Claude. "
+            "G/C = jejich odhad sance. 🤝 = shoda na 1. miste, "
+            "⚠️ = neshodli se, rozhodl prumer, ❔ = malo dat."))
     if ai_failed:
         lines.append(esc(
-            "⚠️ AI preporadani dnes selhalo (podrobnosti v logu) -- "
+            "⚠️ AI debata dnes selhala (podrobnosti v logu) -- "
             "poradi je podle kurzu, bez poznamek."))
     lines.append(esc(f"Virtualne = zisk pri {cfg.virtual_stake:.0f} Kc "
                      "na kazdy tip, jen pro srovnani pasem."))

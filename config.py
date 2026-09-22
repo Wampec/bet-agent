@@ -206,21 +206,25 @@ class Config:
     # Tvrdy prah -- zapasy pod nim se vubec nenabizeji. 0 = bez prahu.
     min_tip_prob: float = 0.0
 
-    # --- AI preporadani ---------------------------------------------------- #
-    # Z kazdeho pasma se AI posle AI_POOL_PER_BAND kandidatu (vic nez se
-    # zobrazi). AI je serad podle "nejtutovejsiho" zapasu a do zpravy jdou
-    # TIPS_PER_BAND nejlepsi. AI NEMA pristup k internetu ani k zivym datum
-    # (zraneni, pocasi, aktualni forma), jen k vlastnim znalostem -- proto ma
-    # v zadani zakaz si tyhle veci vymyslet a kurzove poradi ma brat jako
-    # silny vychozi bod. Bez ANTHROPIC_API_KEY je krok neaktivni a agent
-    # posila tipy podle ciste kurzoveho poradi jako drive.
+    # --- AI preporadani (debata dvou agentu) ------------------------------ #
+    # Z kazdeho pasma se vezme AI_POOL_PER_BAND kandidatu (vic nez se zobrazi).
+    # Gemini k nim s vyhledavanim Google dohleda fakta (zraneni, forma, program,
+    # pocasi...). Pak se Gemini (analytik) a Claude (skeptik) dohaduji, ktery
+    # zapas je v pasmu nejtutovejsi, nejvys AI_MAX_TURNS odpovedi. Vysledne
+    # poradi pocita kod (ai_debate.py). Bez obou klicu (ANTHROPIC_API_KEY,
+    # GEMINI_API_KEY) je krok neaktivni a tipy jdou podle ciste kurzoveho poradi.
     ai_ranking: bool = True
     anthropic_api_key: str = ""
     ai_model: str = "claude-sonnet-5"
-    ai_pool_per_band: int = 6
+    ai_pool_per_band: int = 5
     ai_effort: str = "medium"          # low | medium | high
     ai_max_tokens: int = 8000
-    ai_timeout: float = 90.0
+    ai_timeout: float = 120.0
+    ai_max_turns: int = 4              # odpovedi v debate po uvodnich verdiktech
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-3.8-flash"
+    gemini_max_tokens: int = 16000
+    gemini_timeout: float = 180.0
 
     # --- Spolehlivost odhadu ---------------------------------------------- #
     # Tohle nejsou filtry na "kvalitu sazky", ale na to, jestli se da odhadu
@@ -246,8 +250,9 @@ class Config:
 
     @property
     def ai_active(self) -> bool:
-        """AI krok bezi jen kdyz je zapnuty A je k dispozici klic."""
-        return self.ai_ranking and bool(self.anthropic_api_key)
+        """AI krok bezi jen kdyz je zapnuty A jsou k dispozici oba klice."""
+        return (self.ai_ranking and bool(self.anthropic_api_key)
+                and bool(self.gemini_api_key))
 
     def validate(self, *, require_telegram: bool = True) -> None:
         problems: list[str] = []
@@ -273,6 +278,10 @@ class Config:
             problems.append("AI_MODEL nesmi byt prazdny")
         if self.ai_max_tokens < 1000:
             problems.append("AI_MAX_TOKENS musi byt >= 1000")
+        if not 0 <= self.ai_max_turns <= 10:
+            problems.append("AI_MAX_TURNS musi byt 0 az 10")
+        if not self.gemini_model:
+            problems.append("GEMINI_MODEL nesmi byt prazdny")
         problems += _band_problems(self.odds_bands)
         if self.devig_method not in {"shin", "multiplicative", "power"}:
             problems.append("DEVIG_METHOD musi byt shin | multiplicative | power")
@@ -420,10 +429,15 @@ def load_config() -> Config:
         ai_ranking=_bool("AI_RANKING", True),
         anthropic_api_key=_str("ANTHROPIC_API_KEY"),
         ai_model=_str("AI_MODEL", "claude-sonnet-5"),
-        ai_pool_per_band=_int("AI_POOL_PER_BAND", 6),
+        ai_pool_per_band=_int("AI_POOL_PER_BAND", 5),
         ai_effort=_str("AI_EFFORT", "medium").lower(),
         ai_max_tokens=_int("AI_MAX_TOKENS", 8000),
-        ai_timeout=_float("AI_TIMEOUT", 90.0),
+        ai_timeout=_float("AI_TIMEOUT", 120.0),
+        ai_max_turns=_int("AI_MAX_TURNS", 4),
+        gemini_api_key=_str("GEMINI_API_KEY"),
+        gemini_model=_str("GEMINI_MODEL", "gemini-3.8-flash"),
+        gemini_max_tokens=_int("GEMINI_MAX_TOKENS", 16000),
+        gemini_timeout=_float("GEMINI_TIMEOUT", 180.0),
         min_bookmakers=_int("MIN_BOOKMAKERS", 4),
         max_prob_dispersion=_float("MAX_PROB_DISPERSION", 0.04),
         devig_method=_str("DEVIG_METHOD", "shin").lower(),

@@ -95,8 +95,8 @@ jsou zařazené podle tehdy uloženého nejlepšího kurzu.
    chodí, dokud zápas nezačal (`MIN_MINUTES_BEFORE_START=0`).
 4. **Pásma a seřazení** — zápas se zařadí podle běžného kurzu a v každém pásmu
    se pošlou tři s nejvyšší šancí.
-5. **AI přeřazení** (volitelné, viz níže) — z až 6 kandidátů v pásmu vybere
-   a seřadí tři „nejtutovější“ podle toho, co AI o týmech a hráčích ví.
+5. **AI debata** (volitelné, viz níže): z až 5 kandidátů v pásmu vyberou
+   Gemini a Claude po rešerši na webu a vzájemné debatě tři „nejtutovější“.
 
 ### Jednu věc je fér vědět
 
@@ -111,63 +111,86 @@ Sázej jen peníze, které můžeš ztratit. Linka pomoci: **800 222 222**
 
 ---
 
-## AI přeřazení tipů
+## AI debata o pořadí tipů
 
-Volitelný krok mezi výpočtem šance a odesláním zprávy. Z každého pásma se AI
-(Claude) předloží **až 6 kandidátů** místo 3, seřadí je podle „nejtutovějšího“
-zápasu a do zprávy jde **3 nejlepší z každého pásma** — formát zprávy se
-nemění, přibude jen jednořádková poznámka u každého tipu.
+Volitelný krok mezi výpočtem šance a odesláním zprávy. Z každého pásma se vezme
+**až 5 kandidátů** místo 3 a o jejich pořadí se dohadují dva různí AI agenti.
+Do zprávy jdou **3 nejlepší z každého pásma**, formát zprávy se nemění. U
+každého tipu přibude jen poznámka s odhady obou agentů a hlavním argumentem.
 
-**Co AI zvažuje:** styl hry soupeře, skutečnou výhodu domácího prostředí
-(u týmových sportů; v tenise „doma/venku“ nic neznamená), loňskou sezónu,
-únavu vyplývající z rozvrhu a povrch nebo halu, pokud je zná.
+**Jak debata probíhá:**
 
-**Co AI neví — a proto to nesmí předstírat.** Krok běží **bez přístupu na
-internet**. AI nezná dnešní zranění, sestavy, přestupy, počasí ani výsledky
-posledních zápasů. Zadání jí proto výslovně zakazuje si je vymýšlet a nutí ji
-brát pořadí podle kurzů jako silný výchozí bod (kurzy veřejné informace včetně
-zranění a formy z velké části zahrnují). Od pořadí podle kurzů se má odchýlit
-jen z důvodu, který opravdu zná. Zpráva to říká nahlas:
+1. **Rešerše.** Gemini s vyhledáváním Google ke každému kandidátovi dohledá
+   zranění a absence, posledních ~5 výsledků, vzájemné zápasy, bilanci doma
+   a venku, program a únavu, motivaci (tabulka) a u venkovních sportů počasí.
+   Píše jen fakta s datem a zdrojem, a co nenašel, výslovně uvede. Stejné
+   podklady pak dostanou oba agenti.
+2. **Úvodní verdikty.** Každý agent nezávisle odhadne u každého kandidáta šanci
+   na výhru (0–100 %) a napíše argument. Každý má jinou roli:
+   - **Gemini = analytik.** Staví na datech: forma, vzájemné zápasy, doma
+     a venku, program, tabulka. Velká jména na něj neplatí.
+   - **Claude = skeptik.** Hledá, proč favorit prohraje: absence, rotace,
+     únava, cestování, motivace, nevhodný herní styl, počasí, chybějící data.
+3. **Debata.** V pásmech, kde se neshodnou na 1. místě, se střídají v odpovědích
+   (Gemini, Claude, Gemini…). Každý vidí soupeřovy odhady a argumenty a musí
+   na nejsilnější z nich odpovědět. Názor smí změnit jen kvůli konkrétnímu
+   faktu, ne proto, aby debata skončila. Debata končí, jakmile se agenti
+   shodnou, nejpozději po `AI_MAX_TURNS` (4) odpovědích.
+4. **Verdikt spočítá kód, ne třetí AI.** Na 1. místo jde zápas, na kterém se
+   shodli. Pokud se neshodli, rozhodne vyšší průměr obou odhadů a zpráva to
+   označí. Zbytek pásma se seřadí podle průměru obou odhadů.
 
 ```
 🟢 PÁSMO A · kurz 1,15–1,19
 1. Carlos Alcaraz — 86,0 % · kurz 1,15
     🎾 ATP Peking · dnes 11:30 · proti Kvalifikant
-    💬 Nejlepší hráč turnaje na tvrdém povrchu, soupeř nezkušený.
+    🤝 G 90 % · C 87 %: Soupeř hrál včera tři hodiny kvalifikaci, Alcaraz odpočatý.
 2. Boston Celtics — 81,1 % · kurz 1,21
     🏀 NBA · zítra 01:30 · proti Washington Wizards
-    ❔ Tým znám jen z minulé sezóny, sestavu nemohu ověřit.
+    ❔ G 82 % · C 78 %: O sestavě Celtics rešerše nic nenašla.
 
-Pořadí v pásmech upravila AI (claude-sonnet-5) z vlastních znalostí. Nemá živé
-údaje (zranění, počasí, aktuální forma). ❔ = o tomhle zápase ví málo.
+Pořadí určila debata AI: Gemini (s rešerší na webu) x Claude. G/C = jejich
+odhad šance. 🤝 = shoda na 1. místě, ⚠️ = neshodli se, rozhodl průměr,
+❔ = málo dat.
 ```
 
-`❔` znamená, že AI o dvojici ví málo nebo jen zastarale. Když AI ze žádného
-důvodu nezabere (výpadek služby, neplatná odpověď), zpráva přijde s pořadím podle
-kurzů a řádkem „AI přeřazení dnes selhalo“ — AI nikdy nezpůsobí, že zpráva
-nepřijde.
+**Celý průběh debaty** (rešerše se zdroji, všechny odhady a odpovědi) se každý
+den uloží do složky [`debaty/`](debaty/) jako `RRRR-MM-DD.md`, a to i na GitHubu.
 
-### Zapnutí: klíč Anthropic API
+**Když něco selže:** pokud rešerše jednoho pásma selže, debata pokračuje bez
+dat z webu a agenti to vědí. Pokud selže některý agent (výpadek, neplatná
+odpověď), zpráva přijde s pořadím podle kurzů a řádkem „AI debata dnes
+selhala“. AI nikdy nezpůsobí, že zpráva nepřijde.
 
-Bez klíče je krok **neaktivní** a agent posílá tipy podle kurzů jako dřív.
+### Zapnutí: dva klíče
 
-1. Na <https://console.anthropic.com> založ účet, v *Billing* dobij kredit
-   (stačí pár dolarů) a v *Settings → Limits* nastav **měsíční limit útraty**,
-   např. 5 USD — víc se pak nikdy nestrhne.
+Bez **obou** klíčů je krok neaktivní a tipy jdou podle kurzů jako dřív.
+
+**Anthropic (Claude):**
+1. Na <https://console.anthropic.com> si založ účet, v *Billing* dobij kredit
+   a v *Settings → Limits* nastav **měsíční limit útraty**, např. 5 USD.
 2. *Settings → API keys → Create key*. Klíč se zobrazí jen jednou.
-3. Na GitHubu v repozitáři: *Settings → Secrets and variables → Actions →
-   New repository secret* → název **`ANTHROPIC_API_KEY`**, hodnota klíč.
-4. Volitelně i do lokálního `.env` (`ANTHROPIC_API_KEY=…`), pokud chceš AI
-   zkoušet z počítače.
+3. Na GitHubu: *Settings → Secrets and variables → Actions → New repository
+   secret* → název **`ANTHROPIC_API_KEY`**.
+
+**Google (Gemini), zdarma:**
+1. Na <https://aistudio.google.com> se přihlas účtem Google → *Get API key* →
+   *Create API key*. Platební údaje nezadávej, pak zůstaneš v bezplatné úrovni
+   a nic se nestrhne.
+2. Na GitHubu stejně jako výše, název **`GEMINI_API_KEY`**.
+
+Oba klíče můžeš volitelně dát i do lokálního `.env`.
 
 ### Cena
 
-Jedno volání denně, model `claude-sonnet-5` (2 USD / 10 USD za milion tokenů),
-zhruba 3 000 vstupních a 1 500–3 000 výstupních tokenů: **~0,03 USD denně,
-asi 1 USD měsíčně.** Přesná spotřeba se zapisuje do logu
-(`AI (claude-sonnet-5): 2 600 vstupních + 1 400 výstupních tokenů, ~0.019 USD`).
-Levnější varianta: `AI_MODEL=claude-haiku-4-5` (~0,6 USD měsíčně), silnější
-`claude-opus-5` (~3 USD měsíčně).
+- **Gemini:** bezplatná úroveň. Vyhledávání Google je pro modely Gemini 3.x
+  zdarma do 5 000 dotazů měsíčně a rešerše jich spotřebuje zhruba 30–60 denně.
+  Pozor: v bezplatné úrovni smí Google data z dotazů použít ke zlepšování
+  svých modelů. Tady jde jen o veřejné údaje o zápasech.
+- **Claude** (`claude-sonnet-5`, 2 / 10 USD za milion tokenů): úvodní verdikt
+  a nejvýš 2 odpovědi denně. Úvodní zadání s rešerší jde do prompt cache, takže
+  opakované čtení stojí desetinu. **Orientačně 2–4 USD měsíčně.** Přesná
+  spotřeba je v logu (`AI debata hotova: Claude … ~0.08 USD`).
 
 ### Pomáhá to vůbec? Měří se to
 
@@ -186,17 +209,20 @@ AI vs. čistý kurzový výběr (top 3 v pásmu, jen dny, kdy AI běžela):
 
 Rozhodují **dva poslední řádky**, protože jen tam se AI a kurzy skutečně liší.
 Malé vzorky nic nedokazují: pár desítek tipů rozdíl 2 % nepotvrdí ani nevyvrátí.
-Pokud AI po měsících nevychází lépe, vypni ji (`AI_RANKING=false`) — nic to
-nestojí a agent se vrátí k pořadí podle kurzů.
+Pokud AI po měsících nevychází lépe, vypni ji (`AI_RANKING=false`). Agent se
+vrátí k pořadí podle kurzů a přestaneš za AI platit.
 
 ### Nastavení
 
 | Proměnná | Výchozí | Význam |
 |---|---|---|
-| `AI_RANKING` | `true` | zapnutí kroku (běží jen s klíčem) |
-| `AI_MODEL` | `claude-sonnet-5` | model |
-| `AI_POOL_PER_BAND` | `6` | kolik kandidátů z pásma se AI předloží |
-| `AI_EFFORT` | `medium` | `low` / `medium` / `high` — hloubka uvažování |
+| `AI_RANKING` | `true` | zapnutí kroku (běží jen s oběma klíči) |
+| `AI_POOL_PER_BAND` | `5` | kolik kandidátů z pásma jde do debaty |
+| `AI_MAX_TURNS` | `4` | nejvýš odpovědí v debatě po úvodních verdiktech |
+| `AI_MODEL` | `claude-sonnet-5` | model skeptika |
+| `AI_EFFORT` | `medium` | `low` / `medium` / `high`, hloubka uvažování Clauda |
+| `GEMINI_MODEL` | `gemini-3.8-flash` | model pro rešerši a analytika |
+
 
 ---
 
@@ -258,7 +284,9 @@ main.py         denní běh: výsledky → nabídka → tipy → Telegram
 ├── config.py   načtení nastavení, sportovní profily, pásma, validace
 ├── fetcher.py  The Odds API: výběr soutěží, kurzy, výsledky
 ├── analyzer.py odstranění marže, konsensus, kontroly, pásma
-├── ai_ranker.py volitelné AI přeřazení kandidátů (Claude API)
+├── ai_debate.py volitelná AI debata o pořadí: rešerše + Gemini x Claude
+├── ai_ranker.py kandidáti pro AI a použití výsledného pořadí
+├── gemini.py   klient Gemini API (REST, vyhledávání Google)
 ├── notifier.py sestavení a odeslání zprávy (MarkdownV2)
 └── state.py    deník tipů a statistiky pásem
 

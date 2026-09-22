@@ -779,35 +779,73 @@ def test_message() -> None:
 
 # --------------------------------------------------------------------------- #
 class FakeAI:
-    """Falesny klient Anthropic API -- zaznamena volani a vrati pripravenou odpoved."""
+    """Falesny klient Anthropic API -- vraci pripravene odpovedi postupne."""
 
-    def __init__(self, payload=None, *, text=None, stop_reason="end_turn",
+    def __init__(self, *payloads, text=None, stop_reason="end_turn",
                  error=None, usage=(3000, 1500)):
-        self.payload, self.text = payload, text
+        self.payloads, self.text = list(payloads), text
         self.stop_reason, self.error, self.usage = stop_reason, error, usage
         self.calls: list[dict] = []
         self.messages = self
 
     def create(self, **kwargs):
-        self.calls.append(kwargs)
+        # kopie zprav: agent seznam po volani dal plni
+        self.calls.append({**kwargs, "messages": list(kwargs["messages"])})
         if self.error:
             raise self.error
-        body = self.text if self.text is not None else json.dumps(self.payload)
+        if self.text is not None:
+            body = self.text
+        else:
+            index = min(len(self.calls), len(self.payloads)) - 1
+            body = json.dumps(self.payloads[index])
         return SimpleNamespace(
             content=[SimpleNamespace(type="thinking", thinking=""),
                      SimpleNamespace(type="text", text=body)],
             stop_reason=self.stop_reason,
             usage=SimpleNamespace(input_tokens=self.usage[0],
-                                  output_tokens=self.usage[1]),
+                                  output_tokens=self.usage[1],
+                                  cache_creation_input_tokens=0,
+                                  cache_read_input_tokens=0),
         )
 
 
-def ai_payload(order_by_band: dict[str, list[str]], confidence="medium") -> dict:
+class FakeGemini:
+    """Falesny GeminiClient: resers (search=True) a odpovedi v debate postupne."""
+
+    def __init__(self, *payloads, research="- fakt z webu (zdroj)",
+                 research_error=None, error=None, text=None):
+        self.payloads, self.research = list(payloads), research
+        self.research_error, self.error, self.text = research_error, error, text
+        self.calls: list[dict] = []
+        self.debate_calls = 0
+        self.model = "gemini-test"
+
+    def generate(self, contents, *, system, search=False, schema=None, max_tokens=8192):
+        from gemini import GeminiReply
+        self.calls.append({"contents": list(contents), "system": system,
+                           "search": search, "schema": schema})
+        if search:
+            if self.research_error:
+                raise self.research_error
+            return GeminiReply(text=self.research, sources=[("web", "https://x")],
+                               queries=["q"], input_tokens=100, output_tokens=200)
+        if self.error:
+            raise self.error
+        self.debate_calls += 1
+        if self.text is not None:
+            return GeminiReply(text=self.text)
+        index = min(self.debate_calls, len(self.payloads)) - 1
+        return GeminiReply(text=json.dumps(self.payloads[index]),
+                           input_tokens=1000, output_tokens=500)
+
+
+def verdict(scores: dict[str, dict[str, int]], reply="", evidence="solid") -> dict:
+    """Odpoved agenta: {pasmo: {id: odhad}}."""
     return {"bands": [
-        {"band": band, "ranking": [
-            {"id": cid, "reason": f"duvod {cid}", "confidence": confidence}
-            for cid in ids]}
-        for band, ids in order_by_band.items()]}
+        {"band": band, "reply_to_opponent": reply, "candidates": [
+            {"id": cid, "safety": safety, "argument": f"arg {cid}", "evidence": evidence}
+            for cid, safety in ids.items()]}
+        for band, ids in scores.items()]}
 
 
 def ai_pool(cfg):
@@ -823,10 +861,22 @@ def ai_pool(cfg):
     return result, {k: wide[k] for k in "ABC"}
 
 
+# odhady, na kterych se agenti hned shodnou (1. misto A1, B2)
+AGREE_A = {"A1": 90, "A2": 85, "A3": 80, "A4": 70, "A5": 60}
+AGREE_B = {"B1": 70, "B2": 80}
+
+
+def ai_cfg(**overrides):
+    base = dict(anthropic_api_key="test-key", gemini_api_key="g-key")
+    base.update(overrides)
+    return make_cfg(**base)
+
+
 def test_ai_ranking() -> None:
-    print("\n[13] AI preporadani")
+    print("\n[13] AI debata (Gemini x Claude)")
+    import ai_debate
     import ai_ranker
-    cfg = make_cfg(anthropic_api_key="test-key")
+    cfg = ai_cfg()
     now = datetime.now(timezone.utc)
     result, pool = ai_pool(cfg)
 
@@ -841,170 +891,301 @@ def test_ai_ranking() -> None:
     check("bez limitu zustava TIPS_PER_BAND", len(narrow["A"]) == 3)
     check("odds_rank dostavaji i tipy mimo vyber",
           sum(1 for t in result.tips if t.odds_rank is not None) == len(result.tips))
-
     ids = ai_ranker.candidate_ids(pool)
     check("id kandidatu",
           set(ids) == {"A1", "A2", "A3", "A4", "A5", "B1", "B2", "C1"},
           f"({sorted(ids)})")
 
-    # --- zadani -------------------------------------------------------------- #
-    prompt = ai_ranker.build_prompt(pool, cfg, now)
-    check("prompt obsahuje vsechny kandidaty", all(cid in prompt for cid in ids))
-    check("prompt rika, kolik se nechava", "best 3 per band" in prompt)
-    check("tenis: domaci/hoste nema vyznam", "home/away is meaningless" in prompt)
-    check("tymovy sport: hraje doma/venku", "AT HOME" in prompt or "AWAY" in prompt)
-    check("hazena: remiza je prohra", "draw counts as a loss" in prompt)
-    check("prompt uvadi sanci trhu", "win probability" in prompt)
-    check("system prompt zakazuje si vymyslet zive udaje",
-          "NO live data" in ai_ranker.SYSTEM_PROMPT
-          and "NEVER" in ai_ranker.SYSTEM_PROMPT)
-    check("system prompt bere kurzy jako silny vychozi bod",
-          "strong prior" in ai_ranker.SYSTEM_PROMPT)
-
-    # --- spravna odpoved ----------------------------------------------------- #
-    fake = FakeAI(ai_payload({"A": ["A3", "A1", "A2", "A4", "A5"],
-                              "B": ["B2", "B1"], "C": ["C1"]}))
-    ranking = ai_ranker.rank_with_ai(pool, cfg, now, client=fake)
-    check("AI vratila poradi", ranking is not None)
-    call = fake.calls[0]
-    check("pouzity model z nastaveni", call["model"] == "claude-sonnet-5")
-    check("effort je v output_config", call["output_config"]["effort"] == "medium")
-    check("vystup je vazany na JSON schema",
-          call["output_config"]["format"]["type"] == "json_schema")
-    check("neposilaji se parametry, ktere Sonnet 5 odmita",
-          not any(k in call for k in ("temperature", "top_p", "top_k")))
-    check("max_tokens je omezeny", call["max_tokens"] == cfg.ai_max_tokens)
-    check("system prompt se posila", "NO internet" in call["system"])
+    # --- hned shoda ------------------------------------------------------------ #
+    claude = FakeAI(verdict({"A": AGREE_A, "B": AGREE_B}))
+    gem = FakeGemini(verdict({"A": AGREE_A, "B": AGREE_B}))
+    ranking = ai_debate.run_debate(pool, cfg, now, claude_client=claude, gemini_client=gem)
+    check("debata vratila poradi", ranking is not None)
     if ranking is None:
         return
-    check("poradi A podle AI", ranking.order["A"] == ["A3", "A1", "A2", "A4", "A5"])
-    check("verdikt nese duvod a jistotu",
-          ranking.verdicts["A3"].reason == "duvod A3"
-          and ranking.verdicts["A3"].confidence == "medium")
-    check("cena se spocita: 3000 vstup + 1500 vystup pri 2/10 USD",
-          ranking.cost_usd is not None and math.isclose(ranking.cost_usd, 0.021),
-          f"({ranking.cost_usd})")
-    check("tokeny se zaznamenaji",
-          (ranking.input_tokens, ranking.output_tokens) == (3000, 1500))
-    check("neznamy model nema odhad ceny",
-          ai_ranker.estimate_cost("neznamy-model", 1000, 1000) is None)
+    research = [c for c in gem.calls if c["search"]]
+    check("resers jen pro pasma s aspon 2 kandidaty (A, B)", len(research) == 2)
+    check("resers hleda vse podstatne",
+          all(k in research[0]["contents"][0]["parts"][0]["text"]
+              for k in ("injuries", "head-to-head", "weather", "rest")))
+    check("pri shode v uvodu zadne dalsi kolo",
+          len(claude.calls) == 1 and gem.debate_calls == 1)
+    check("shoda ve vsech debatovanych pasmech",
+          ranking.consensus == {"A": True, "B": True}, f"({ranking.consensus})")
+    check("poradi A podle prumeru", ranking.order["A"] == ["A1", "A2", "A3", "A4", "A5"])
+    check("B: agenti povysili B2", ranking.order["B"] == ["B2", "B1"])
+    check("pasmo s 1 kandidatem se nedebatuje", ranking.order["C"] == ["C1"]
+          and "C" not in ranking.consensus)
 
-    # --- pouziti poradi ------------------------------------------------------ #
-    fake2 = FakeAI(ai_payload({"A": ["A5", "A1", "A2", "A3", "A4"],
-                               "B": ["B1", "B2"], "C": ["C1"]}, confidence="low"))
-    result2, pool2 = ai_pool(cfg)
-    ranking2 = ai_ranker.rank_with_ai(pool2, cfg, now, client=fake2)
-    chosen, extras = ai_ranker.apply_ai_order(pool2, ranking2, cfg)
-    a_names = [t.selection for t in chosen["A"]]
-    expected = [pool2["A"][4].selection, pool2["A"][0].selection,
-                pool2["A"][1].selection]
-    check("do zpravy jdou 3 nejlepsi podle AI", a_names == expected, f"({a_names})")
-    check("AI vytahla tip z konce vyberu", chosen["A"][0].odds_rank == 5)
-    check("vyrazeny tip je mezi 'navic'",
-          [t.selection for t in extras["A"]] == [pool2["A"][2].selection],
-          f"({[t.selection for t in extras['A']]})")
-    check("kdyz AI nic nevyradi, neni nic 'navic'",
-          extras["B"] == [] and extras["C"] == [])
-    check("tipy dostaly ai_rank",
-          chosen["A"][0].ai_rank == 1 and pool2["A"][3].ai_rank == 5)
-    check("tipy dostaly duvod a jistotu",
-          chosen["A"][0].ai_reason == "duvod A5"
-          and chosen["A"][0].ai_confidence == "low")
-    check("v pasmu se necha nejvys TIPS_PER_BAND",
-          all(len(v) <= 3 for v in chosen.values()))
-    ai_ranker.log_verdicts(pool2, ranking2)   # nesmi spadnout
+    call = claude.calls[0]
+    prompt = call["messages"][0]["content"][0]["text"]
+    check("uvodni zadani obsahuje vsechny debatovane kandidaty",
+          all(cid in prompt for cid in ("A1", "A5", "B1", "B2")))
+    check("uvodni zadani obsahuje resers", "fakt z webu" in prompt)
+    check("tenis: domaci/hoste nema vyznam", "home/away is meaningless" in prompt)
+    check("zadani uvadi sanci trhu", "win probability" in prompt)
+    check("Claude je skeptik, Gemini analytik",
+          "SKEPTIC" in call["system"] and "ANALYST" in gem.calls[-1]["system"])
+    check("pravidla zakazuji vymyslet fakta",
+          "Never invent" in call["system"] and "Never invent" in gem.calls[-1]["system"])
+    check("Claude: model a effort z nastaveni",
+          call["model"] == "claude-sonnet-5" and call["output_config"]["effort"] == "medium")
+    check("Claude: vystup vazany na JSON schema",
+          call["output_config"]["format"]["type"] == "json_schema")
+    check("Claude: zadne parametry, ktere Sonnet 5 odmita",
+          not any(k in call for k in ("temperature", "top_p", "top_k")))
+    check("Claude: uvodni zadani jde do prompt cache",
+          call["messages"][0]["content"][0].get("cache_control") == {"type": "ephemeral"})
+    check("Gemini: odpoved vazana na schema, resers bez schematu",
+          gem.calls[-1]["schema"] is not None and research[0]["schema"] is None)
+    check("verdikt nese oba odhady",
+          ranking.verdicts["A1"].reason.startswith("G 90 % · C 90 %"),
+          f"({ranking.verdicts['A1'].reason})")
+    check("1. misto pri shode = 'agreed'", ranking.verdicts["A1"].confidence == "agreed")
+    check("ostatni podle dat", ranking.verdicts["A2"].confidence == "solid")
+    check("cena Clauda se spocita", ranking.cost_usd is not None and ranking.cost_usd > 0)
+    check("prubeh debaty se zapise",
+          "# Debata" in ranking.transcript and "shoda na A1 hned" in ranking.transcript
+          and "fakt z webu" in ranking.transcript)
+
+    # --- neshoda, pak Gemini ustoupi --------------------------------------------- #
+    _, pool2 = ai_pool(cfg)
+    c_open = {"A": {"A1": 70, "A2": 75, "A3": 88, "A4": 60, "A5": 50}, "B": AGREE_B}
+    g_open = {"A": AGREE_A, "B": AGREE_B}
+    g_turn = {"A": {"A1": 80, "A2": 78, "A3": 86, "A4": 65, "A5": 55}}
+    claude2 = FakeAI(verdict(c_open))
+    gem2 = FakeGemini(verdict(g_open), verdict(g_turn, reply="Uznavam, A3 je lepsi."))
+    r2 = ai_debate.run_debate(pool2, cfg, now, claude_client=claude2, gemini_client=gem2)
+    check("neshoda -> debata -> shoda", r2 is not None and r2.consensus.get("A") is True)
+    if r2:
+        check("vitez debaty je na 1. miste", r2.order["A"][0] == "A3", f"({r2.order['A']})")
+        check("Claude uz nemusel odpovidat", len(claude2.calls) == 1)
+        turn_text = gem2.calls[-1]["contents"][-1]["parts"][0]["text"]
+        check("odpoved se tyka jen sporneho pasma",
+              "band(s) A" in turn_text and "BAND B" not in turn_text)
+        check("agent vidi argumenty soupere", "arg A3" in turn_text)
+        check("zadani varuje pred ustupem kvuli dohode", "Giving in" in turn_text)
+        check("Gemini vidi celou svou konverzaci", len(gem2.calls[-1]["contents"]) == 3)
+        check("prubeh zaznamena odpoved", "Uznavam, A3 je lepsi." in r2.transcript
+              and "po 1. odpovedi" in r2.transcript)
+
+    # --- neshoda az do konce -------------------------------------------------- #
+    _, pool3 = ai_pool(cfg)
+    c_stub = {"A": {"A1": 70, "A2": 90, "A3": 60, "A4": 50, "A5": 40}, "B": AGREE_B}
+    g_stub = {"A": {"A1": 95, "A2": 80, "A3": 60, "A4": 50, "A5": 40}, "B": AGREE_B}
+    claude3 = FakeAI(verdict(c_stub), verdict({"A": c_stub["A"]}))
+    gem3 = FakeGemini(verdict(g_stub), verdict({"A": g_stub["A"]}))
+    r3 = ai_debate.run_debate(pool3, ai_cfg(ai_max_turns=3), now,
+                              claude_client=claude3, gemini_client=gem3)
+    check("bez shody se debata ukonci po AI_MAX_TURNS", r3 is not None
+          and gem3.debate_calls == 3 and len(claude3.calls) == 2,
+          f"(G {gem3.debate_calls}, C {len(claude3.calls)})")
+    if r3:
+        check("bez shody rozhodne prumer (A2: 85 > A1: 82,5)",
+              r3.order["A"][0] == "A2" and r3.consensus["A"] is False)
+        check("1. misto bez shody = 'disputed'", r3.verdicts["A2"].confidence == "disputed")
+        last_text = gem3.calls[-1]["contents"][-1]["parts"][0]["text"]
+        check("posledni odpoved vi, ze je posledni", "LAST exchange" in last_text)
+        check("prubeh rika, ze se neshodli", "BEZ SHODY" in r3.transcript)
+    r0 = ai_debate.run_debate(ai_pool(cfg)[1], ai_cfg(ai_max_turns=0), now,
+                              claude_client=FakeAI(verdict(c_stub)),
+                              gemini_client=FakeGemini(verdict(g_stub)))
+    check("AI_MAX_TURNS=0: jen uvodni verdikty, rozhodne prumer",
+          r0 is not None and r0.order["A"][0] == "A2")
 
     # --- tolerance k chybam v odpovedi ---------------------------------------- #
-    messy = FakeAI({"bands": [
-        {"band": "PASMO A (kurz 1,15-1,19)", "ranking": [
-            {"id": "A2", "reason": "  dvojite   mezery  ", "confidence": "high"},
-            {"id": "A2", "reason": "duplicita", "confidence": "high"},
-            {"id": "Z9", "reason": "neexistuje", "confidence": "high"},
-            {"id": "A1", "reason": "x", "confidence": "nesmysl"},
-        ]}]})
-    _, pool3 = ai_pool(cfg)
-    r3 = ai_ranker.rank_with_ai(pool3, cfg, now, client=messy)
-    check("odpoved s chybami se prece jen pouzije", r3 is not None)
-    if r3:
-        check("duplicita a neznamy kandidat se ignoruji",
-              r3.order["A"][:2] == ["A2", "A1"], f"({r3.order['A']})")
-        check("chybejici kandidati jdou na konec v kurzovem poradi",
-              r3.order["A"] == ["A2", "A1", "A3", "A4", "A5"]
-              and r3.order["B"] == ["B1", "B2"] and r3.order["C"] == ["C1"],
-              f"({r3.order})")
-        check("mezery v duvodu se srovnaji",
-              r3.verdicts["A2"].reason == "dvojite mezery")
-        check("neplatna jistota se bere jako 'low'",
-              r3.verdicts["A1"].confidence == "low")
-        check("dopocteni kandidati nemaji vymysleny duvod",
-              r3.verdicts["A3"].reason == "" and r3.verdicts["A3"].confidence == "low")
-        check("problemy odpovedi se hlasi", len(r3.notes) == 3, f"({r3.notes})")
+    band_ids = {"A": ["A1", "A2", "A3"]}
+    parsed, notes = ai_debate.parse_verdict({"bands": [{"band": "PASMO A", "candidates": [
+        {"id": "a2", "safety": "81", "argument": "  dvojite   mezery ", "evidence": "solid"},
+        {"id": "A2", "safety": 99, "argument": "duplicita", "evidence": "solid"},
+        {"id": "Z9", "safety": 99, "argument": "neexistuje", "evidence": "solid"},
+        {"id": "A1", "safety": 150, "argument": "x", "evidence": "nesmysl"},
+        {"id": "A3", "safety": "hodne", "argument": "x", "evidence": "solid"},
+    ]}]}, band_ids)
+    a = parsed["A"]
+    check("id se bere bez ohledu na velikost pismen", a.ratings["A2"].safety == 81)
+    check("odhad nad 100 se orizne", a.ratings["A1"].safety == 100)
+    check("neplatny odhad = kandidat bez odhadu jde na konec",
+          a.ratings["A3"].safety is None and a.order() == ["A1", "A2", "A3"])
+    check("mezery se srovnaji", a.ratings["A2"].argument == "dvojite mezery")
+    check("neplatne 'evidence' = thin", a.ratings["A1"].evidence == "thin")
+    check("problemy odpovedi se hlasi", len(notes) == 2, f"({notes})")
+    check("shoda odhadu -> rozhodne trh",
+          ai_debate.BandVerdict({"A2": ai_debate.Rating(80), "A1": ai_debate.Rating(80)})
+          .pick() == "A1")
 
-    # --- vsechna selhani vedou zpet ke kurzum ------------------------------ #
-    def falls_back(name, client, use_cfg=None):
+    # --- resers selze, debata pokracuje -------------------------------------- #
+    from gemini import GeminiError
+    _, pool4 = ai_pool(cfg)
+    r4 = ai_debate.run_debate(
+        pool4, cfg, now, claude_client=FakeAI(verdict({"A": AGREE_A, "B": AGREE_B})),
+        gemini_client=FakeGemini(verdict({"A": AGREE_A, "B": AGREE_B}),
+                                 research_error=GeminiError("HTTP 429")))
+    check("selhani reserse debatu nezastavi", r4 is not None)
+    if r4:
+        check("agenti i prubeh vi, ze data chybi", "selhala" in r4.transcript)
+
+    # --- selhani agentu vede zpet ke kurzum ---------------------------------- #
+    def falls_back(name, claude_client, gemini_client, use_cfg=None):
         _, pl = ai_pool(cfg)
-        res = ai_ranker.rank_with_ai(pl, use_cfg or cfg, now, client=client)
+        res = ai_debate.run_debate(pl, use_cfg or cfg, now, claude_client=claude_client,
+                                   gemini_client=gemini_client)
         untouched = all(t.ai_rank is None for tips in pl.values() for t in tips)
         check(name, res is None and untouched)
 
-    falls_back("chyba site -> kurzove poradi", FakeAI(error=RuntimeError("boom")))
-    falls_back("neplatny JSON -> kurzove poradi", FakeAI(text="{ nejsem json"))
-    falls_back("prazdny text -> kurzove poradi", FakeAI(text=""))
-    falls_back("odpoved bez pole bands -> kurzove poradi", FakeAI({"neco": 1}))
-    falls_back("bands neni pole -> kurzove poradi", FakeAI({"bands": "x"}))
-    falls_back("zadny platny kandidat -> kurzove poradi",
-               FakeAI(ai_payload({"A": ["X1", "X2"]})))
-    falls_back("dosly tokeny -> kurzove poradi",
-               FakeAI(ai_payload({"A": ["A1"]}), stop_reason="max_tokens"))
-    falls_back("odmitnuti -> kurzove poradi",
-               FakeAI(ai_payload({"A": ["A1"]}), stop_reason="refusal"))
-    falls_back("AI_RANKING=false -> kurzove poradi",
-               FakeAI(ai_payload({"A": ["A1"]})),
-               use_cfg=make_cfg(anthropic_api_key="k", ai_ranking=False))
+    ok_g = lambda: FakeGemini(verdict({"A": AGREE_A, "B": AGREE_B}))   # noqa: E731
+    ok_c = lambda: FakeAI(verdict({"A": AGREE_A, "B": AGREE_B}))       # noqa: E731
+    falls_back("chyba Clauda -> kurzy", FakeAI(error=RuntimeError("boom")), ok_g())
+    falls_back("chyba Gemini v debate -> kurzy", ok_c(),
+               FakeGemini(error=GeminiError("HTTP 500")))
+    falls_back("neplatny JSON od Clauda -> kurzy", FakeAI(text="{ nejsem json"), ok_g())
+    falls_back("neplatny JSON od Gemini -> kurzy", ok_c(), FakeGemini(text="nic"))
+    falls_back("Claude: dosly tokeny -> kurzy",
+               FakeAI(verdict({"A": AGREE_A, "B": AGREE_B}), stop_reason="max_tokens"), ok_g())
+    falls_back("Claude: odmitnuti -> kurzy",
+               FakeAI(verdict({"A": AGREE_A, "B": AGREE_B}), stop_reason="refusal"), ok_g())
+    falls_back("uvodni verdikt bez pasma -> kurzy", FakeAI(verdict({"A": AGREE_A})), ok_g())
+    falls_back("odpoved bez pole bands -> kurzy", FakeAI({"neco": 1}), ok_g())
+    falls_back("AI_RANKING=false -> kurzy", ok_c(), ok_g(), use_cfg=ai_cfg(ai_ranking=False))
 
-    idle = FakeAI(ai_payload({"A": ["A1"]}))
+    idle_c, idle_g = ok_c(), ok_g()
     _, pool_solo = ai_pool(cfg)
     solo = {"A": pool_solo["A"][:1], "B": pool_solo["B"][:1], "C": []}
     check("kdyz neni co radit (kazde pasmo max 1), API se nevola",
-          ai_ranker.rank_with_ai(solo, cfg, now, client=idle) is None
-          and not idle.calls)
-    check("bez klice se API nevola a nic se neimportuje",
-          ai_ranker.rank_with_ai(pool_solo, make_cfg(), now) is None)
+          ai_debate.run_debate(solo, cfg, now, claude_client=idle_c, gemini_client=idle_g)
+          is None and not idle_c.calls and not idle_g.calls)
+    check("bez klice Gemini se nic nevola",
+          ai_debate.skip_reason(pool_solo, ai_cfg(gemini_api_key="")) == "chybi GEMINI_API_KEY")
+    check("bez klice Anthropic se nic nevola",
+          ai_debate.skip_reason(pool_solo, ai_cfg(anthropic_api_key=""))
+          == "chybi ANTHROPIC_API_KEY")
+    check("bez klicu se vubec nic nespusti",
+          ai_debate.run_debate(pool_solo, make_cfg(), now) is None)
+
+    # --- cena ---------------------------------------------------------------- #
+    check("cena: 3000 vstup + 1500 vystup pri 2/10 USD",
+          math.isclose(ai_ranker.estimate_cost("claude-sonnet-5", 3000, 1500), 0.021))
+    check("cena: cteni z cache je za desetinu",
+          math.isclose(ai_ranker.estimate_cost("claude-sonnet-5", 0, 0, cache_read=10_000),
+                       0.002))
+    check("neznamy model nema odhad ceny",
+          ai_ranker.estimate_cost("neznamy-model", 1000, 1000) is None)
 
     # --- choose_tips (cely vyber) ------------------------------------------ #
     import main as agent_main
-    result4, _ = ai_pool(cfg)
-    fake4 = FakeAI(ai_payload({"A": ["A5", "A1", "A2", "A3", "A4"],
-                               "B": ["B1", "B2"], "C": ["C1"]}))
-    selected, extras4, ai4, failed4 = agent_main.choose_tips(
-        result4.tips, cfg, now, ai_client=fake4)
-    check("choose_tips: AI poradi se pouzije",
-          ai4 is not None and selected["A"][0].odds_rank == 5 and not failed4)
+    pick_a5 = {"A": {"A1": 70, "A2": 69, "A3": 68, "A4": 60, "A5": 90}, "B": AGREE_B}
+    result5, _ = ai_pool(cfg)
+    selected, extras5, ai5, failed5 = agent_main.choose_tips(
+        result5.tips, cfg, now, ai_client=FakeAI(verdict(pick_a5)),
+        gemini_client=FakeGemini(verdict(pick_a5)))
+    check("choose_tips: poradi z debaty se pouzije",
+          ai5 is not None and selected["A"][0].odds_rank == 5 and not failed5)
     check("choose_tips: tichy zbytek se orezava na TIPS_PER_BAND",
           all(len(selected[k]) <= 3 for k in analyzer.REST_KEYS))
-    check("choose_tips: vraci i 'navic'", len(extras4["A"]) == 1)
+    check("choose_tips: vyrazeny kurzovy tip je mezi 'navic'",
+          [t.odds_rank for t in extras5["A"]] == [3])
+    check("tipy dostaly ai_rank a duvod",
+          selected["A"][0].ai_rank == 1 and "arg A5" in selected["A"][0].ai_reason)
 
-    result5, _ = ai_pool(cfg)
-    sel5, ext5, ai5, failed5 = agent_main.choose_tips(result5.tips, make_cfg(), now)
-    check("bez klice: cisty kurzovy vyber, zadne 'navic'",
-          ai5 is None and ext5 == {} and len(sel5["A"]) == 3 and not failed5
-          and [t.odds_rank for t in sel5["A"]] == [1, 2, 3])
     result6, _ = ai_pool(cfg)
-    sel6, ext6, ai6, failed6 = agent_main.choose_tips(
-        result6.tips, cfg, now, ai_client=FakeAI(error=RuntimeError("boom")))
+    sel6, ext6, ai6, failed6 = agent_main.choose_tips(result6.tips, make_cfg(), now)
+    check("bez klicu: cisty kurzovy vyber, zadne 'navic'",
+          ai6 is None and ext6 == {} and not failed6
+          and [t.odds_rank for t in sel6["A"]] == [1, 2, 3])
+    result7, _ = ai_pool(cfg)
+    sel7, ext7, ai7, failed7 = agent_main.choose_tips(
+        result7.tips, cfg, now, ai_client=FakeAI(error=RuntimeError("boom")),
+        gemini_client=ok_g())
     check("pri selhani AI: stejny vyber jako bez AI",
-          ai6 is None and ext6 == {}
-          and [t.selection for t in sel6["A"]] == [t.selection for t in sel5["A"]])
-    check("pri selhani AI se to oznaci (zprava to musi rict)", failed6)
+          ai7 is None and ext7 == {}
+          and [t.selection for t in sel7["A"]] == [t.selection for t in sel6["A"]])
+    check("pri selhani AI se to oznaci (zprava to musi rict)", failed7)
 
-    # kdyz neni co radit, neni to selhani
     few = [two_way_event("only1", "SoloFav", "SoloDog", prices=(1.16,) * 4,
                          dog_price=5.0)]
     res_few = analyzer.analyze(few, cfg)
     _, _, ai_few, failed_few = agent_main.choose_tips(
-        res_few.tips, cfg, now, ai_client=FakeAI(ai_payload({"A": ["A1"]})))
+        res_few.tips, cfg, now, ai_client=ok_c(), gemini_client=ok_g())
     check("kdyz neni co radit, AI se nevola a neni to selhani",
           ai_few is None and not failed_few)
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        path = agent_main.save_transcript("# Debata\n", "2026-09-22", Path(tmp) / "debaty")
+        check("prubeh debaty se ulozi do debaty/RRRR-MM-DD.md",
+              path is not None and path.name == "2026-09-22.md"
+              and path.read_text(encoding="utf-8") == "# Debata\n")
+
+
+def test_gemini_client() -> None:
+    print("\n[13a] Klient Gemini API")
+    from gemini import GeminiClient, GeminiError, strip_additional_properties
+
+    class Resp:
+        def __init__(self, status, data=None, text=""):
+            self.status_code, self._data, self.text = status, data, text
+
+        def json(self):
+            return self._data
+
+    class Http:
+        def __init__(self, *responses):
+            self.responses, self.calls = list(responses), []
+
+        def post(self, url, **kwargs):
+            self.calls.append((url, kwargs))
+            item = self.responses.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+    ok = {"candidates": [{
+        "content": {"parts": [{"text": "premysleni", "thought": True},
+                              {"text": "odpoved"}]},
+        "finishReason": "STOP",
+        "groundingMetadata": {
+            "webSearchQueries": ["Sinner injury"],
+            "groundingChunks": [{"web": {"uri": "https://a", "title": "atp.com"}},
+                                {"web": {"uri": "https://a", "title": "atp.com"}}]}}],
+        "usageMetadata": {"promptTokenCount": 10, "candidatesTokenCount": 5,
+                          "thoughtsTokenCount": 7}}
+    waits: list[float] = []
+    http = Http(Resp(429, text="quota"), Resp(200, ok))
+    client = GeminiClient("tajny-klic", "gemini-x", http=http, sleep=waits.append)
+    reply = client.generate([{"role": "user", "parts": [{"text": "q"}]}],
+                            system="s", search=True, schema={"type": "object",
+                                                             "additionalProperties": False})
+    check("premysleni modelu neni v odpovedi", reply.text == "odpoved")
+    check("zdroje a dotazy se prevezmou bez duplicit",
+          reply.sources == [("atp.com", "https://a")] and reply.queries == ["Sinner injury"])
+    check("tokeny vcetne premysleni", (reply.input_tokens, reply.output_tokens) == (10, 12))
+    check("429 -> pocka a zkusi znovu", len(http.calls) == 2 and waits == [15.0])
+    url, kwargs = http.calls[-1]
+    check("klic je v hlavicce, ne v URL",
+          "tajny-klic" not in url and kwargs["headers"]["x-goog-api-key"] == "tajny-klic")
+    check("vyhledavani Google zapnute", kwargs["json"]["tools"] == [{"googleSearch": {}}])
+    check("schema bez additionalProperties",
+          "additionalProperties" not in kwargs["json"]["generationConfig"]["responseJsonSchema"])
+    check("strip funguje i do hloubky",
+          strip_additional_properties({"a": [{"additionalProperties": False, "b": 1}]})
+          == {"a": [{"b": 1}]})
+
+    def raises(name, *responses):
+        try:
+            GeminiClient("k", "m", http=Http(*responses), sleep=lambda s: None).generate(
+                [], system="s")
+            check(name, False)
+        except GeminiError:
+            check(name, True)
+
+    raises("HTTP 400 -> chyba hned", Resp(400, text="bad"))
+    raises("opakovane 503 -> chyba", Resp(503), Resp(503), Resp(503))
+    raises("dosly tokeny -> chyba",
+           Resp(200, {"candidates": [{"content": {"parts": [{"text": "x"}]},
+                                      "finishReason": "MAX_TOKENS"}]}))
+    raises("zablokovany dotaz -> chyba", Resp(200, {"promptFeedback": {"blockReason": "SAFETY"}}))
+    raises("prazdna odpoved -> chyba",
+           Resp(200, {"candidates": [{"content": {"parts": []}, "finishReason": "STOP"}]}))
 
 
 def test_ai_tracking() -> None:
@@ -1058,15 +1239,20 @@ def test_ai_tracking() -> None:
 
 def test_ai_message() -> None:
     print("\n[13c] AI: zprava na Telegram a nastaveni")
-    import ai_ranker
-    cfg = make_cfg(anthropic_api_key="k")
+    import ai_debate
+    cfg = ai_cfg()
     now = datetime.now(timezone.utc)
     result, pool = ai_pool(cfg)
-    payload = ai_payload({"A": ["A2", "A1", "A3", "A4", "A5"],
-                          "B": ["B1", "B2"], "C": ["C1"]})
-    payload["bands"][0]["ranking"][0]["confidence"] = "low"
-    payload["bands"][0]["ranking"][1]["reason"] = "Vyrovnany souboj, " + "dlouhy text " * 30
-    ranking = ai_ranker.rank_with_ai(pool, cfg, now, client=FakeAI(payload))
+    c_open = {"A": {"A1": 70, "A2": 91, "A3": 60, "A4": 50, "A5": 40},
+              "B": {"B1": 80, "B2": 70}}
+    g_open = {"A": {"A1": 95, "A2": 80, "A3": 60, "A4": 50, "A5": 40},
+              "B": {"B1": 80, "B2": 70}}
+    payload_c = verdict(c_open, evidence="thin")
+    payload_c["bands"][0]["candidates"][1]["argument"] = "Vyrovnany souboj, " + "dlouhy text " * 40
+    ranking = ai_debate.run_debate(
+        pool, ai_cfg(ai_max_turns=0), now,
+        claude_client=FakeAI(payload_c), gemini_client=FakeGemini(verdict(g_open)))
+    import ai_ranker
     chosen, _ = ai_ranker.apply_ai_order(pool, ranking, cfg)
 
     from state import BandStats
@@ -1075,11 +1261,13 @@ def test_ai_message() -> None:
     print("\n----- nahled zpravy s AI -----")
     print(msg)
     print("----- konec nahledu -----")
-    check("poznamka AI je ve zprave", "duvod A3" in msg)
-    check("nejista poznamka ma otaznik", "❔" in msg)
-    check("jista poznamka ma bublinu", "\U0001f4ac" in msg)
-    check("zprava rika, ze AI nema zive udaje",
-          "Nema zive udaje" in msg and "upravila AI" in msg)
+    check("poznamka AI je ve zprave", "arg B1" in msg)
+    check("odhady obou agentu jsou ve zprave", "G 95 % · C 70 %" in msg)
+    check("shoda ma podani ruky", "🤝" in msg)
+    check("neshoda ma varovani", "⚠️" in msg)
+    check("malo dat ma otaznik", "❔" in msg)
+    check("zprava vysvetluje znacky a rika, odkud poradi je",
+          "debata AI" in msg and "Gemini" in msg and "Claude" in msg)
     check("dlouha poznamka se zkrati", "dlouhy text " * 20 not in msg and "…" in msg)
     check("vejde se do limitu Telegramu", len(msg) <= 4096, f"(={len(msg)})")
     check("zadna neescapovana tecka", ". " not in msg.replace("\\. ", " "),
@@ -1090,8 +1278,16 @@ def test_ai_message() -> None:
                         analyzer.select_by_band(fresh_result.tips, cfg),
                         stats, [], cfg)
     check("bez AI zadne upozorneni ani poznamky",
-          "upravila AI" not in plain and "\U0001f4ac" not in plain
-          and "❔" not in plain)
+          "debata AI" not in plain and "\U0001f4ac" not in plain
+          and "❔" not in plain and "🤝" not in plain)
+
+    failed_msg = format_tips(fresh_result,
+                             analyzer.select_by_band(fresh_result.tips, cfg),
+                             stats, [], cfg, ai_failed=True)
+    check("pri selhani AI zprava na to upozorni",
+          "AI debata dnes selhala" in failed_msg and "poradi je podle kurzu" in failed_msg)
+    check("bez selhani zadne upozorneni na selhani",
+          "dnes selhala" not in plain and "dnes selhala" not in msg)
 
     def fails(**kwargs) -> str:
         try:
@@ -1100,22 +1296,17 @@ def test_ai_message() -> None:
             return str(exc)
         return ""
 
-    failed_msg = format_tips(fresh_result,
-                             analyzer.select_by_band(fresh_result.tips, cfg),
-                             stats, [], cfg, ai_failed=True)
-    check("pri selhani AI zprava na to upozorni",
-          "AI preporadani dnes selhalo" in failed_msg
-          and "poradi je podle kurzu" in failed_msg)
-    check("bez selhani zadne upozorneni na selhani",
-          "dnes selhalo" not in plain and "dnes selhalo" not in msg)
-
     check("AI_POOL_PER_BAND mensi nez TIPS_PER_BAND se odchyti",
           "AI_POOL_PER_BAND" in fails(ai_pool_per_band=2, tips_per_band=3))
     check("neznamy AI_EFFORT se odchyti", "AI_EFFORT" in fails(ai_effort="extreme"))
     check("prazdny AI_MODEL se odchyti", "AI_MODEL" in fails(ai_model=""))
-    check("AI je aktivni jen s klicem",
-          make_cfg(anthropic_api_key="k").ai_active and not make_cfg().ai_active
-          and not make_cfg(anthropic_api_key="k", ai_ranking=False).ai_active)
+    check("AI_MAX_TURNS mimo rozsah se odchyti", "AI_MAX_TURNS" in fails(ai_max_turns=11))
+    check("prazdny GEMINI_MODEL se odchyti", "GEMINI_MODEL" in fails(gemini_model=""))
+    check("AI je aktivni jen s obema klici",
+          ai_cfg().ai_active and not make_cfg().ai_active
+          and not ai_cfg(gemini_api_key="").ai_active
+          and not ai_cfg(anthropic_api_key="").ai_active
+          and not ai_cfg(ai_ranking=False).ai_active)
 
 
 def test_scheduling() -> None:
@@ -1180,8 +1371,10 @@ def test_scheduling() -> None:
               all(f"secrets.{k}" in text
                   for k in ("ODDS_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")))
         check("workflow zapisuje denik zpet", "git push" in text and "tips.json" in text)
-        check("workflow predava ANTHROPIC_API_KEY ze secrets",
-              "secrets.ANTHROPIC_API_KEY" in text)
+        check("workflow predava klice AI ze secrets",
+              "secrets.ANTHROPIC_API_KEY" in text and "secrets.GEMINI_API_KEY" in text)
+        check("workflow uklada i prubeh debaty", "git add debaty" in text)
+        check("workflow ma cas na debatu", "timeout-minutes: 20" in text)
         check("selhani instalace anthropic nezabije cely beh",
               "grep -v '^anthropic'" in text)
 
@@ -1194,7 +1387,8 @@ def test_settings_split() -> None:
         text = settings.read_text(encoding="utf-8")
         check("settings.env neobsahuje zadne klice",
               not any(line.split("=", 1)[0].strip() in
-                      ("ODDS_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID")
+                      ("ODDS_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
+                       "ANTHROPIC_API_KEY", "GEMINI_API_KEY")
                       for line in text.splitlines()))
         check("settings.env obsahuje pasma", "ODDS_BANDS=" in text)
 
@@ -1235,6 +1429,7 @@ def main() -> int:
     test_config_validation()
     test_message()
     test_ai_ranking()
+    test_gemini_client()
     test_ai_tracking()
     test_ai_message()
     test_scheduling()

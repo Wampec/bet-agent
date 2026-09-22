@@ -42,7 +42,8 @@ concurrency:
 jobs:
   tipy:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # AI debata (resers na webu + nekolik kol) trva par minut.
+    timeout-minutes: 20
 
     steps:
       - name: Stahnout kod a denik tipu
@@ -55,7 +56,7 @@ jobs:
           cache: pip
 
       - name: Nainstalovat knihovny
-        # Balicek 'anthropic' je jen pro volitelny AI krok. Kdyby se ho nepodarilo
+        # Balicek 'anthropic' je jen pro volitelnou AI debatu. Kdyby se ho nepodarilo
         # nainstalovat, nesmi kvuli tomu spadnout cely beh -- zprava musi prijit.
         # Agent pak AI krok preskoci (a ve zprave to rekne).
         run: |
@@ -70,8 +71,9 @@ jobs:
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          # Volitelny: bez nej se AI preporadani preskoci.
+          # Volitelne: bez obou klicu se AI debata preskoci.
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           FORCE: ${{ inputs.force }}
         run: |
           if [ "$FORCE" = "true" ]; then
@@ -80,15 +82,16 @@ jobs:
             python main.py --once-per-day --not-before 07:55
           fi
 
-      - name: Ulozit denik tipu do repozitare
+      - name: Ulozit denik tipu (a prubeh debaty) do repozitare
         run: |
-          if git diff --quiet -- tips.json; then
+          git add tips.json
+          if [ -d debaty ]; then git add debaty; fi
+          if git diff --cached --quiet; then
             echo "Denik tipu se nezmenil."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tips.json
           git commit -m "Denik tipu $(TZ=Europe/Prague date +%Y-%m-%d)"
           # Kdyby mezitim nekdo upravil treba settings.env na webu.
           git pull --rebase
