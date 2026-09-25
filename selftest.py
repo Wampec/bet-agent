@@ -670,8 +670,8 @@ def test_config_validation() -> None:
 
     cfg = load_config()
     check("load_config projde", cfg.tips_per_band >= 1)
-    check("vychozi pasma jsou 1,15-1,19 / 1,20-1,24 / 1,25 a vys",
-          make_cfg().odds_bands == ((1.15, 1.19), (1.20, 1.24), (1.25, math.inf)))
+    check("vychozi pasma jsou 1,15-1,19 / 1,20-1,24 / 1,25-1,29",
+          make_cfg().odds_bands == ((1.15, 1.19), (1.20, 1.24), (1.25, 1.29)))
 
     import os
     import config as config_module
@@ -748,7 +748,7 @@ def test_message() -> None:
     check("vsechna tri pasma jsou ve zprave",
           all(f"PASMO {k}" in msg for k in "ABC"))
     check("pasma ukazuji rozsah kurzu",
-          "1,15–1,19" in msg and "1,20–1,24" in msg and "1,25 a vys" in msg)
+          "1,15–1,19" in msg and "1,20–1,24" in msg and "1,25–1,29" in msg)
     check("tipy jsou v prislusnych pasmech",
           msg.index("Alcaraz") < msg.index("PASMO B") < msg.index("Celtics")
           < msg.index("PASMO C") < msg.index("Magdeburg"))
@@ -864,7 +864,7 @@ def ai_pool(cfg):
                             dog_price=4.4 + 0.3 * i) for i in range(5)]
     events += [two_way_event(f"b{i}", f"FavB{i}", f"DogB{i}", prices=(1.22,) * 4,
                              dog_price=4.0 + 0.4 * i) for i in range(2)]
-    events.append(three_way_event("c0", "FavC0", "DogC0", fav_prices=(1.30,) * 4,
+    events.append(three_way_event("c0", "FavC0", "DogC0", fav_prices=(1.28,) * 4,
                                   dog_price=4.0, draw_price=9.0))
     result = analyzer.analyze(events, cfg)
     wide = analyzer.select_by_band(result.tips, cfg, limit=cfg.ai_pool_per_band)

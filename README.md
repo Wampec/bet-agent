@@ -128,9 +128,9 @@ v každém pásmu a vybere tři nejjistější. **Nic to nestojí.**
 Jsi zkušený sportovní analytik. Dnes je 22.09.2026. …
 Úkol: 1. Ke každému zápasu vyhledej na webu … 3. Z každého pásma vyber 3 nejjistější tipy …
 
-PÁSMO C (kurz 1,25 a vys)
+PÁSMO C (kurz 1,25–1,29)
 C1 | Maria Sakkari – Linda Fruhvirtova | tenis, WTA Singapore Open | 22.09. 13:40 | tip: výhra Maria Sakkari | trh 78 % | kurz 1,25
-C2 | Chicago Sky – Toronto Tempo | basketbal, WNBA | 23.09. 02:00 | tip: výhra Chicago Sky, hraje doma | trh 68 % | kurz 1,40
+C2 | Chicago Sky – Toronto Tempo | basketbal, WNBA | 23.09. 02:00 | tip: výhra Chicago Sky, hraje doma | trh 74 % | kurz 1,29
 ```
 
 Vypíná se `CHAT_PROMPT=false`.
@@ -483,7 +483,7 @@ v `settings.env`.
 
 | Proměnná | Výchozí | Význam |
 |---|---|---|
-| `ODDS_BANDS` | `1.15-1.19,1.20-1.24,1.25+` | kurzová pásma; nesmí se překrývat, `1.25+` = bez horní hranice (jen poslední) |
+| `ODDS_BANDS` | `1.15-1.19,1.20-1.24,1.25-1.29` | kurzová pásma; nesmí se překrývat. Horní strop je 1,29; zápis `1.25+` by značil pásmo bez horní hranice (jen poslední) |
 | `TIPS_PER_BAND` | `3` | kolik hlavních tipů v každém pásmu (počítají se do statistik) |
 | `LIST_PER_BAND` | `10` | kolik zápasů na pásmo vypsat celkem (hlavní tipy + další kandidáti) |
 | `CHAT_PROMPT` | `true` | druhá zpráva s hotovým textem pro chat |

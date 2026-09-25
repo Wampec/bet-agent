@@ -194,11 +194,11 @@ class Config:
     # se posle TIPS_PER_BAND zapasu s nejvyssi sanci.
     #   A 1,15-1,19: nejvyssi jistota tipu, k 2x je potreba 4-5 vyher
     #   B 1,20-1,24: k 2x je potreba 4 vyhry
-    #   C 1,25 a vys: k 2x staci 3-4 vyhry (bez horni hranice)
-    # Zapasy mimo pasma se ukladaji potichu (neposilaji se), aby slo pozdeji
-    # porovnat, jak by si vedly.
+    #   C 1,25-1,29: k 2x staci 3-4 vyhry
+    # Kurzy nad 1,29 se uz nenabizeji. Zapasy mimo pasma se ukladaji potichu
+    # (neposilaji se), aby slo pozdeji porovnat, jak by si vedly.
     odds_bands: tuple[tuple[float, float], ...] = (
-        (1.15, 1.19), (1.20, 1.24), (1.25, math.inf))
+        (1.15, 1.19), (1.20, 1.24), (1.25, 1.29))
     tips_per_band: int = 3
     # Pod hlavnimi tipy se vypisou dalsi kandidati az do LIST_PER_BAND na pasmo
     # (kratce, do statistik se nepocitaji -- ukladaji se potichu).
@@ -358,7 +358,7 @@ def _sport_groups(profile: str) -> list[str]:
     return list(SPORT_PROFILES[profile])
 
 
-DEFAULT_ODDS_BANDS = "1.15-1.19,1.20-1.24,1.25+"
+DEFAULT_ODDS_BANDS = "1.15-1.19,1.20-1.24,1.25-1.29"
 
 
 def _odds_bands() -> tuple[tuple[float, float], ...]:
