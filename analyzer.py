@@ -589,10 +589,18 @@ def check_tip(
 # --------------------------------------------------------------------------- #
 def prefilter_soccer_events(events: Sequence[Event], cfg: Config) -> list[Event]:
     """
-    Levny predvyber pred placenym dotazem na trhy 1X / DNB: seradi zapasy
-    podle sance, ze domaci neprohraji, a vrati je od nejjistejsiho.
+    Levny predvyber pred placenym dotazem na trhy 1X / DNB.
+
+    Nehleda nejjistejsi zapasy, ale ty, ktere maji sanci skoncit V PASMECH:
+    u nejvetsich favoritu je dvojita sance kolem 1,02 a tip by se do zpravy
+    nikdy nedostal, takze by to byly vyhozene kredity. Zapasy uvnitr pasem
+    jdou prvni (od nejjistejsiho), zbytek za nimi podle vzdalenosti od pasem.
     """
-    scored: list[tuple[float, Event]] = []
+    lo = cfg.odds_bands[0][0]
+    hi = cfg.odds_bands[-1][1]
+    # Odhad kurzu z h2h: 1X = favorit vyhraje nebo remizuje, DNB = bez remizy.
+    use_dc = "double_chance" in cfg.soccer_markets or not cfg.soccer_markets
+    scored: list[tuple[int, float, float, Event]] = []
     for event in events:
         consensus, _ = consensus_probs(event.markets.get("h2h", []), cfg.devig_method)
         if not consensus:
@@ -605,9 +613,13 @@ def prefilter_soccer_events(events: Sequence[Event], cfg: Config) -> list[Event]
             continue
         if cfg.soccer_home_favourite_only and not (p_home > p_away and p_home > p_draw):
             continue
-        scored.append((p_home + p_draw, event))
-    scored.sort(key=lambda pair: pair[0], reverse=True)
-    return [event for _, event in scored]
+        prob = p_home + p_draw if use_dc else p_home / max(1e-9, p_home + p_away)
+        odds = 1.0 / max(1e-9, min(0.999, prob))
+        inside = lo <= odds <= hi
+        distance = 0.0 if inside else min(abs(odds - lo), abs(odds - hi))
+        scored.append((0 if inside else 1, distance, -prob, event))
+    scored.sort(key=lambda row: row[:3])
+    return [row[3] for row in scored]
 
 
 def analyze(

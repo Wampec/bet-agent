@@ -482,6 +482,52 @@ def test_soccer_tip() -> None:
           not analyzer.analyze([away_fav], cfg).tips)
 
 
+def test_soccer_prefilter() -> None:
+    print("\n[6b] Fotbal: predvyber miri do pasem (spori kredity)")
+    cfg = make_cfg(enable_soccer=True)
+
+    def three_way(eid, home, prices):
+        """prices = (kurz domaci, remiza, hoste) u ctyr kancelari."""
+        event = make_event(eid, "soccer_epl", "Soccer", home, "Outsider")
+        for name, (h, d, a) in zip("ABCD", prices):
+            add_market(event, name, "h2h", {home: h, "Draw": d, "Outsider": a})
+        return event
+
+    # Barcelona: 1X kolem 1,02 (pod pasmy). Lazio: 1X kolem 1,16 (pasmo A).
+    # Stredni tym: 1X kolem 1,35 (nad pasmy).
+    giant = three_way("big", "Barcelona", [(1.05, 15.0, 40.0)] * 4)
+    target = three_way("mid", "Lazio", [(1.62, 4.0, 5.4)] * 4)
+    weak = three_way("weak", "Slavia", [(2.10, 3.5, 3.4)] * 4)
+    # Hoste jsou favorit -> pri SOCCER_HOME_FAVOURITE_ONLY nema co delat v seznamu.
+    away_fav = three_way("away", "Verona", [(5.5, 4.0, 1.60)] * 4)
+    order = analyzer.prefilter_soccer_events([giant, target, weak], cfg)
+    names = [e.home_team for e in order]
+    check("prvni je zapas, ktery se vejde do pasem", names[0] == "Lazio", f"({names})")
+    check("obri favorit (1X ~1,02) jde az za nej", names.index("Barcelona") > 0,
+          f"({names})")
+
+    def est_1x(event):
+        consensus, _ = analyzer.consensus_probs(event.markets["h2h"], cfg.devig_method)
+        draw = analyzer._draw_key(consensus)
+        return consensus[event.home_team] + consensus[draw]
+
+    check("obri favorit je opravdu pod pasmy", 1 / est_1x(giant) < cfg.odds_bands[0][0],
+          f"(kurz {1 / est_1x(giant):.2f})")
+    check("cilovy zapas je opravdu v pasmech",
+          cfg.odds_bands[0][0] <= 1 / est_1x(target) <= cfg.odds_bands[-1][1],
+          f"(kurz {1 / est_1x(target):.2f})")
+    check("predvyber vyradi zapasy, kde favoritem nejsou domaci",
+          analyzer.prefilter_soccer_events([away_fav], cfg) == []
+          and len(analyzer.prefilter_soccer_events(
+              [away_fav], make_cfg(enable_soccer=True,
+                                   soccer_home_favourite_only=False))) == 1)
+
+    # DNB se pocita jinak (bez remizy) -- predvyber to musi vzit v potaz.
+    dnb_cfg = make_cfg(enable_soccer=True, soccer_markets=["draw_no_bet"])
+    dnb_order = analyzer.prefilter_soccer_events([giant, target, weak], dnb_cfg)
+    check("u DNB se poradi pocita z jine sance", dnb_order and dnb_order[0] is not None)
+
+
 def test_tip_log() -> None:
     print("\n[7] Denik tipu")
     cfg = make_cfg()
@@ -1619,6 +1665,7 @@ def main() -> int:
     test_three_way_markets()
     test_mixed_market_structures()
     test_soccer_tip()
+    test_soccer_prefilter()
     test_tip_log()
     test_evaluate_score()
     test_sport_selection()

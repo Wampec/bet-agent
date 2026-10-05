@@ -22,6 +22,7 @@ from __future__ import annotations
 import math
 import os
 import sys
+from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -175,6 +176,10 @@ class Config:
 
     enable_soccer: bool = False
     soccer_home_favourite_only: bool = True
+    # Dny, kdy se fotbal vubec dotahuje (1 = pondeli ... 7 = nedele).
+    # Prazdne = kazdy den. O vikendu uz tipy davaji ostatni sporty, takze
+    # omezeni na vsedni dny setri kredity tam, kde nejsou potreba.
+    soccer_weekdays: list[int] = field(default_factory=list)
     soccer_markets: list[str] = field(
         default_factory=lambda: ["double_chance", "draw_no_bet"]
     )
@@ -260,6 +265,15 @@ class Config:
     @property
     def tz(self) -> ZoneInfo:
         return ZoneInfo(self.timezone)
+
+    def soccer_today(self, now: datetime | None = None) -> bool:
+        """Ma se dnes fotbal dotahovat? (SOCCER_WEEKDAYS)"""
+        if not self.enable_soccer:
+            return False
+        if not self.soccer_weekdays:
+            return True
+        local = (now or datetime.now(self.tz)).astimezone(self.tz)
+        return local.weekday() + 1 in self.soccer_weekdays
 
     @property
     def ai_active(self) -> bool:
@@ -348,6 +362,21 @@ class Config:
 
 
 # --------------------------------------------------------------------------- #
+def _weekdays() -> list[int]:
+    """SOCCER_WEEKDAYS: '1,2,3,4' = pondeli az ctvrtek. Prazdne = kazdy den."""
+    days: list[int] = []
+    for raw in _csv("SOCCER_WEEKDAYS"):
+        try:
+            value = int(raw)
+        except ValueError:
+            raise ConfigError(f"SOCCER_WEEKDAYS: '{raw}' neni cislo 1-7") from None
+        if not 1 <= value <= 7:
+            raise ConfigError("SOCCER_WEEKDAYS musi byt cisla 1 (pondeli) az 7 (nedele)")
+        if value not in days:
+            days.append(value)
+    return days
+
+
 def _sport_groups(profile: str) -> list[str]:
     """SPORT_GROUPS ma prednost pred SPORT_PROFILE."""
     explicit = _csv("SPORT_GROUPS")
@@ -439,6 +468,7 @@ def load_config() -> Config:
         sport_key_blacklist=_csv("SPORT_KEY_BLACKLIST"),
         enable_soccer=enable_soccer,
         soccer_home_favourite_only=_bool("SOCCER_HOME_FAVOURITE_ONLY", True),
+        soccer_weekdays=_weekdays(),
         soccer_markets=_csv("SOCCER_MARKETS", "double_chance,draw_no_bet"),
         soccer_league_whitelist=_soccer_leagues(),
         timezone=_str("TIMEZONE", "Europe/Prague"),

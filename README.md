@@ -273,7 +273,7 @@ vrátí k pořadí podle kurzů a přestaneš za AI platit.
 | **Házená** | **trojcestný** | Remíza je možná (bývá 3–8 %) a je to **prohraná sázka**. Spočtená šance to už zohledňuje, tip je ve zprávě označený. |
 | **Americký fotbal** | dvoucestný | Hodně výrazných favoritů, hlavně v univerzitní lize (NCAAF): v týdenním testu padlo do pásem 19 zápasů se šancí 80–85 %. Hraje se ale skoro jen v sobotu (NFL v neděli a v noci na pondělí), takže ve zbytku týdne nenabídne nic. Sezóna září–leden. |
 | Baseball, hokej | dvoucestný | Jen v profilu `wide`. Výrazné favority mají vzácněji — v testu nepadl do pásem ani jeden zápas. |
-| Fotbal | 1X / DNB | Vypnutý — remíza vyžaduje odvozené trhy, které se dotahují po jednotlivých zápasech a stojí 2 kredity za zápas. Zapíná se přes `ENABLE_SOCCER`. |
+| **Fotbal** | **1X (dvojitá šance)** | Zapnutý kvůli všedním dnům (evropské poháry hrají Út–Čt). Výhra favorita se do pásem vejde zřídka, ale tip „favorit vyhraje nebo remizuje" často: v testu Serie A padlo do pásem 6 z 10 zápasů. Potřebuje dotažení trhu po zápasech (1 kredit za zápas), proto se tahá jen ve dnech podle `SOCCER_WEEKDAYS` a jen u `MAX_EVENT_MARKET_LOOKUPS` nejvhodnějších zápasů. |
 
 Profily: `individual` (jen tenis), `low_variance` (tenis + basketbal),
 `core` (tenis + basketbal + házená),
@@ -309,7 +309,14 @@ které zrovna hrají — **soutěže mimo sezónu jsou zdarma**.
 | Výpis soutěží | 0 |
 | Kurzy (1 dotaz na soutěž se zápasy) | 1 za soutěž |
 | Dohledání výsledků | 2 za soutěž, jen když jsou nevyhodnocené tipy |
-| **Reálně** | **~5–15 za den** |
+| Fotbalové trhy 1X | 1 za zápas, nejvýš `MAX_EVENT_MARKET_LOOKUPS` (4) a jen ve dnech z `SOCCER_WEEKDAYS` |
+| **Reálně** | **~5–20 za den** |
+
+Soutěž bez zápasů v časovém okně **nestojí nic** — devět dotázaných soutěží
+v testu sebralo jen 4 kredity. Proto je seznam fotbalových lig klidně delší.
+Předvýběr fotbalu navíc míří do pásem: u největších favoritů je dvojitá šance
+kolem 1,02, což by byl vyhozený kredit, takže se dotahují zápasy s 1X zhruba
+mezi 1,15 a 1,29.
 
 Pojistka: pod `MIN_CREDITS_RESERVE` (40) už agent kurzy nestahuje a pošle
 varování. Skutečnou spotřebu vypisuje každý běh do `agent.log`.
@@ -503,7 +510,9 @@ v `settings.env`.
 | `MIN_MINUTES_BEFORE_START` | `0` | odstup před začátkem zápasu; `0` = tipy chodí, dokud zápas nezačal |
 | `MAX_HOURS_AHEAD` | `24` | den i následující noc |
 | `TRACK_RESULTS` | `true` | hlásit, jak dopadly minulé tipy |
-| `ENABLE_SOCCER` | `false` | zapne drahou fotbalovou větev |
+| `ENABLE_SOCCER` | `true` | zapne fotbalovou větev (trhy po zápasech) |
+| `SOCCER_WEEKDAYS` | `1,2,3,4,5` | dny, kdy se fotbal tahá (1 = pondělí); prázdné = každý den |
+| `SOCCER_MARKETS` | `double_chance` | `double_chance` (1X) a/nebo `draw_no_bet`; každý trh = 1 kredit za zápas |
 
 Jiná pásma? Například `ODDS_BANDS=1.12-1.20,1.21-1.30,1.31+`. Pásma dostanou
 postupně zelenou, oranžovou, modrou a fialovou ikonu. Víc tipů? Zvyš `TIPS_PER_BAND`.

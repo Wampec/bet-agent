@@ -399,7 +399,10 @@ def fetch_daily_events(client: OddsAPIClient, now: datetime | None = None) -> li
             "Zadna soutez ze skupin %s prave nebezi.", ", ".join(cfg.sport_groups)
         )
 
-    if cfg.enable_soccer:
+    if cfg.enable_soccer and not cfg.soccer_today(now):
+        log.info("Fotbal se dnes nedotahuje (SOCCER_WEEKDAYS=%s).",
+                 ",".join(str(d) for d in cfg.soccer_weekdays))
+    elif cfg.enable_soccer:
         soccer_keys = client.soccer_sport_keys()
         log.info("Fotbalovych lig k dotazu: %s", len(soccer_keys))
         sport_keys = sport_keys + soccer_keys
