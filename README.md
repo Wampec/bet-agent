@@ -268,14 +268,17 @@ vrátí k pořadí podle kurzů a přestaneš za AI platit.
 
 | Sport | Trh | Poznámka |
 |---|---|---|
-| **Tenis** | dvoucestný | Žádná remíza. V raných kolech turnajů bývají favorité přes 90 %. Při skreči většina kanceláří sázku ruší. |
+| **Tenis (jen ATP)** | dvoucestný | Žádná remíza. V raných kolech turnajů bývají favorité přes 90 %. Při skreči většina kanceláří sázku ruší. **Ženský tenis je vyřazený** (`SPORT_KEY_BLACKLIST=tennis_wta_*`) — je výrazně variabilnější než mužský. |
 | **Basketbal** | dvoucestný | Z týmových sportů nejmíň náhodný — hodně skórování znamená, že lepší tým vyhrává častěji. |
 | **Házená** | **trojcestný** | Remíza je možná (bývá 3–8 %) a je to **prohraná sázka**. Spočtená šance to už zohledňuje, tip je ve zprávě označený. |
-| Baseball, hokej | dvoucestný | Jen v profilu `wide`. Výrazné favority mají vzácněji. |
+| **Americký fotbal** | dvoucestný | Hodně výrazných favoritů, hlavně v univerzitní lize (NCAAF): v týdenním testu padlo do pásem 19 zápasů se šancí 80–85 %. Hraje se ale skoro jen v sobotu (NFL v neděli a v noci na pondělí), takže ve zbytku týdne nenabídne nic. Sezóna září–leden. |
+| Baseball, hokej | dvoucestný | Jen v profilu `wide`. Výrazné favority mají vzácněji — v testu nepadl do pásem ani jeden zápas. |
 | Fotbal | 1X / DNB | Vypnutý — remíza vyžaduje odvozené trhy, které se dotahují po jednotlivých zápasech a stojí 2 kredity za zápas. Zapíná se přes `ENABLE_SOCCER`. |
 
 Profily: `individual` (jen tenis), `low_variance` (tenis + basketbal),
-**`core` (výchozí: tenis + basketbal + házená)**, `wide` (+ baseball a hokej).
+`core` (tenis + basketbal + házená),
+**`core_us` (výchozí: + americký fotbal)**, `wide` (+ baseball a hokej).
+Vlastní sestavu nastavíš přes `SPORT_GROUPS` (má přednost před profilem).
 
 ### Sporty s remízou
 
@@ -489,7 +492,9 @@ v `settings.env`.
 | `CHAT_PROMPT` | `true` | druhá zpráva s hotovým textem pro chat |
 | `VIRTUAL_STAKE` | `100` | sázka pro virtuální zisk ve statistikách |
 | `MIN_TIP_PROB` | `0.0` | tvrdý práh šance; `0` = bez prahu |
-| `SPORT_PROFILE` | `core` | `individual` \| `low_variance` \| `core` \| `wide` |
+| `SPORT_PROFILE` | `core_us` | `individual` \| `low_variance` \| `core` \| `core_us` \| `wide` |
+| `SPORT_GROUPS` | (prázdné) | vlastní seznam skupin; má přednost před profilem |
+| `SPORT_KEY_BLACKLIST` | `tennis_wta_*` | vyřazené soutěže; smí být vzor s hvězdičkou |
 | `MAX_SPORT_KEYS` | `12` | strop počtu dotazovaných soutěží |
 | `ODDS_REGIONS` | `eu` | víc regionů = víc kanceláří i kreditů |
 | `MIN_BOOKMAKERS` | `4` | míň kanceláří = odhadu nevěřit |

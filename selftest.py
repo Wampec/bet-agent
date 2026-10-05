@@ -595,6 +595,10 @@ def test_sport_selection() -> None:
          "active": True, "has_outrights": False},
         {"key": "soccer_epl", "group": "Soccer", "active": True,
          "has_outrights": False},
+        {"key": "tennis_wta_china_open", "group": "Tennis", "active": True,
+         "has_outrights": False},
+        {"key": "americanfootball_ncaaf", "group": "American Football",
+         "active": True, "has_outrights": False},
         {"key": "tennis_winner_2026", "group": "Tennis", "active": True,
          "has_outrights": True},
     ]
@@ -617,6 +621,35 @@ def test_sport_selection() -> None:
     check("fotbal se do zakladniho vyberu nedostane", "soccer_epl" not in keys)
     check("outright trhy se preskoci", "tennis_winner_2026" not in keys)
     check("turnaj nejvyssi urovne je prvni", keys[0] == "tennis_atp_us_open")
+
+    check("profil core_us bere americky fotbal",
+          "americanfootball_ncaaf" in keys_for(make_cfg(
+              sport_profile="core_us",
+              sport_groups=["Tennis", "Basketball", "Handball",
+                            "American Football"])))
+    check("core bez americkeho fotbalu", "americanfootball_ncaaf" not in keys)
+
+    # SPORT_KEY_BLACKLIST: presny klic i vzor s hvezdickou
+    wta_out = keys_for(make_cfg(sport_key_blacklist=["tennis_wta_*"]))
+    check("vzor tennis_wta_* vyradi zensky tenis",
+          "tennis_wta_china_open" not in wta_out
+          and "tennis_atp_us_open" in wta_out, f"({wta_out})")
+    check("vzor nevyradi muzsky tenis ani ostatni sporty",
+          {"basketball_nba", "handball_germany_bundesliga"} <= set(wta_out))
+    check("presny klic v blacklistu pořád funguje",
+          "basketball_nba" not in keys_for(make_cfg(
+              sport_key_blacklist=["basketball_nba"])))
+    check("blacklist plati i pro whitelist",
+          keys_for(make_cfg(sport_key_whitelist=["tennis_wta_china_open",
+                                                 "tennis_atp_us_open"],
+                            sport_key_blacklist=["tennis_wta_*"]))
+          == ["tennis_atp_us_open"])
+
+    from ai_ranker import SPORT_CS
+    from notifier import SPORT_ICONS
+    check("americky fotbal ma ikonu i cesky nazev",
+          SPORT_ICONS.get("American Football") == "🏈"
+          and SPORT_CS.get("American Football") == "americky fotbal")
 
     check("MAX_SPORT_KEYS omezi pocet dotazu",
           len(keys_for(make_cfg(max_sport_keys=2))) == 2)

@@ -31,6 +31,7 @@ SPORT_ICONS = {
     "Baseball": "⚾",
     "Ice Hockey": "\U0001f3d2",
     "Soccer": "⚽",
+    "American Football": "🏈",
 }
 BAND_ICONS = ("\U0001f7e2", "\U0001f7e0", "\U0001f535", "\U0001f7e3")
 RESULT_ICONS = {STATUS_WON: "✅", STATUS_LOST: "❌", STATUS_VOID: "↩️"}

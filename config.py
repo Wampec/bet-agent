@@ -69,6 +69,9 @@ SPORT_PROFILES: dict[str, tuple[str, ...]] = {
     "low_variance": ("Tennis", "Basketball"),
     "core": ("Tennis", "Basketball", "Handball"),
     "wide": ("Tennis", "Basketball", "Baseball", "Ice Hockey", "Handball"),
+    # Americky fotbal ma dvoucestny trh a hodne vyraznych favoritu, hlavne
+    # v univerzitni lize (NCAAF). Sezona zari-leden.
+    "core_us": ("Tennis", "Basketball", "Handball", "American Football"),
 }
 DEFAULT_SPORT_PROFILE = "core"
 

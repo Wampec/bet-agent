@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from fnmatch import fnmatch
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
@@ -184,6 +185,10 @@ class OddsAPIClient:
             log.debug("Aktivnich souteci celkem: %s", len(self._sports_cache))
         return self._sports_cache
 
+    def _excluded(self, key: str) -> bool:
+        """SPORT_KEY_BLACKLIST: presny klic, nebo vzor s hvezdickou (tennis_wta_*)."""
+        return any(fnmatch(key, pattern) for pattern in self.cfg.sport_key_blacklist)
+
     def select_sport_keys(self) -> list[str]:
         """
         Vybere souteze k dotazu podle SPORT_GROUPS, serazene podle priority
@@ -191,13 +196,12 @@ class OddsAPIClient:
         """
         cfg = self.cfg
         wanted = {g.lower() for g in cfg.sport_groups}
-        blacklist = set(cfg.sport_key_blacklist)
 
         if cfg.sport_key_whitelist:
             available = {s["key"] for s in self.list_sports()}
             keys = [
                 k for k in cfg.sport_key_whitelist
-                if k in available and k not in blacklist
+                if k in available and not self._excluded(k)
             ]
             for missing in (k for k in cfg.sport_key_whitelist if k not in available):
                 log.info("Soutez '%s' neni prave aktivni -- preskakuji.", missing)
@@ -209,7 +213,7 @@ class OddsAPIClient:
         for sport in self.list_sports():
             key = sport.get("key", "")
             group = (sport.get("group") or "").lower()
-            if group not in wanted or sport.get("has_outrights") or key in blacklist:
+            if group not in wanted or sport.get("has_outrights") or self._excluded(key):
                 continue
             if group == TENNIS_GROUP.lower():
                 if not key.startswith(TENNIS_PREFIXES):

@@ -36,6 +36,7 @@ SPORT_CS = {
     "Baseball": "baseball",
     "Ice Hockey": "hokej",
     "Soccer": "fotbal",
+    "American Football": "americky fotbal",
 }
 
 # Jak jisty je verdikt u tipu (Tip.ai_confidence) -- podle toho zprava vybere znacku.
