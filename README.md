@@ -41,6 +41,11 @@ Jen tipy; kolik a jestli vůbec vsadíš, je na tobě.
 Pásem může být i víc (`ODDS_BANDS=1.15-1.19,1.20-1.24,1.25-1.29`), zpráva je
 pak rozdělí a statistiky vede zvlášť.
 
+**Když je tipů málo, pásmo se pro ten den rozšíří** na `WIDE_ODDS_BANDS`
+(1,20–1,30). Spustí se to, až když v původním pásmu není aspoň
+`FALLBACK_MIN_TIPS` (10) příležitostí — a to i po přidání záložních sportů.
+Zpráva pak ukáže širší rozsah a připíše, že pásmo je dnes širší.
+
 - **Zařazení podle běžného kurzu** — tedy mediánu napříč kancelářemi, zaokrouhleného
   na setiny. Nejlepší kurz často nabízí burza (Betfair, Matchbook) a české kanceláře
   v datech nejsou, takže u své kanceláře dostaneš spíš kurz kolem mediánu.
@@ -50,7 +55,7 @@ pak rozdělí a statistiky vede zvlášť.
 - **Úzké pásmo znamená málo tipů.** Rozsah 1,26–1,30 je široký jen pět setin, a
   tím pádem ho většina zápasů mine: v měření 8. 10. 2026 padl do pásma jeden tip
   z 37 (pod 1,20 pět, 1,20–1,25 tři, 1,31–1,40 jedenáct, nad 1,40 sedmnáct).
-  Deset tipů denně tedy čekej jen ve dnech s velkou nabídkou.
+  Proto se v takové dny pásmo samo rozšíří na 1,20–1,30 (viz výše).
 - **Tichý zbytek** — zápasy mimo pásmo se neposílají, ale ukládají se se
   stejnými statistikami. Za pár měsíců tak půjde porovnat, jestli by si vedly
   lépe (`python main.py --status`).
@@ -518,6 +523,7 @@ v `settings.env`.
 | `ODDS_BANDS` | `1.15-1.19,1.20-1.24,1.25-1.29` | kurzová pásma; nesmí se překrývat. Horní strop je 1,29; zápis `1.25+` by značil pásmo bez horní hranice (jen poslední) |
 | `TIPS_PER_BAND` | `10` | kolik hlavních tipů v každém pásmu (počítají se do statistik) |
 | `LIST_PER_BAND` | `10` | kolik zápasů na pásmo vypsat celkem (hlavní tipy + další kandidáti) |
+| `WIDE_ODDS_BANDS` | `1.20-1.30` | širší pásmo pro dny s malou nabídkou; prázdné = nerozšiřovat |
 | `CHAT_PROMPT` | `true` | druhá zpráva s hotovým textem pro chat |
 | `VIRTUAL_STAKE` | `100` | sázka pro virtuální zisk ve statistikách |
 | `MIN_TIP_PROB` | `0.0` | tvrdý práh šance; `0` = bez prahu |

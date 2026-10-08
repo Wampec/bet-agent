@@ -32,6 +32,7 @@ import argparse
 import logging
 import math
 import sys
+from dataclasses import replace
 from datetime import datetime, time, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -353,6 +354,15 @@ def run(args: argparse.Namespace) -> int:
     elif cfg.fallback_groups:
         log.info("Prilezitosti v pasmech: %s -- zalozni sporty (%s) dnes netreba.",
                  in_bands, ", ".join(cfg.fallback_groups))
+
+    # Kdyz je tipu porad malo, pouziji se sirsi pasma (WIDE_ODDS_BANDS).
+    narrow_count = count_in_bands(result.tips, cfg)
+    cfg, widened = widen_bands_if_needed(result.tips, cfg)
+    if widened:
+        log.info("Prilezitosti v pasmech: %s (chci %s) -- rozsiruji pasma na %s.",
+                 narrow_count, cfg.fallback_min_tips,
+                 ", ".join(band_range_text(lo, hi) for lo, hi in cfg.odds_bands))
+        result = analyze(pool, cfg, now)
     log.info("Spotreba API: %s", client.quota)
 
     # V kazdem pasmu TIPS_PER_BAND tipu do zpravy -- bud podle AI (z vetsiho
@@ -399,6 +409,7 @@ def run(args: argparse.Namespace) -> int:
         ai_used=ai is not None,
         ai_failed=ai_failed,
         more=more,
+        widened=widened,
     )
     _notify(notifier, message)
     if cfg.chat_prompt:
@@ -423,6 +434,20 @@ def _with_soccer_markets(
             log.error("Doplnkove trhy: %s", exc)
         pool += shortlist[: cfg.max_event_market_lookups]
     return pool
+
+
+def widen_bands_if_needed(
+    tips: list[Tip], cfg: Config
+) -> tuple[Config, bool]:
+    """
+    Kdyz je prilezitosti malo, vrati nastaveni se sirsimi pasmy
+    (WIDE_ODDS_BANDS). Druha hodnota rika, jestli se rozsirovalo.
+    """
+    if not cfg.wide_odds_bands:
+        return cfg, False
+    if count_in_bands(tips, cfg) >= cfg.fallback_min_tips:
+        return cfg, False
+    return replace(cfg, odds_bands=cfg.wide_odds_bands), True
 
 
 def count_in_bands(tips: list[Tip], cfg: Config) -> int:

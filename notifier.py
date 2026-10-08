@@ -248,6 +248,7 @@ def format_tips(
     ai_used: bool = False,
     ai_failed: bool = False,
     more: dict[str, list[Tip]] | None = None,
+    widened: bool = False,
 ) -> str:
     """Denni zprava: rekapitulace + tipy po kurzovych pasmech (+ dalsi kandidati)."""
     now = now or datetime.now(cfg.tz)
@@ -296,6 +297,9 @@ def format_tips(
         lines.append(esc(
             "⚠️ AI debata dnes selhala (podrobnosti v logu) -- "
             "poradi je podle kurzu, bez poznamek."))
+    if widened:
+        lines.append(esc(
+            "Pasmo je dnes sirsi, protoze v puvodnim bylo malo prilezitosti."))
     lines.append(esc(f"Virtualne = zisk pri {cfg.virtual_stake:.0f} Kc "
                      "na kazdy tip, jen pro srovnani pasem."))
     return "\n".join(lines)

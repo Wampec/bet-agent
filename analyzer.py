@@ -596,8 +596,7 @@ def prefilter_soccer_events(events: Sequence[Event], cfg: Config) -> list[Event]
     nikdy nedostal, takze by to byly vyhozene kredity. Zapasy uvnitr pasem
     jdou prvni (od nejjistejsiho), zbytek za nimi podle vzdalenosti od pasem.
     """
-    lo = cfg.odds_bands[0][0]
-    hi = cfg.odds_bands[-1][1]
+    lo, hi = cfg.target_odds_range
     # Odhad kurzu z h2h: 1X = favorit vyhraje nebo remizuje, DNB = bez remizy.
     use_dc = "double_chance" in cfg.soccer_markets or not cfg.soccer_markets
     scored: list[tuple[int, float, float, Event]] = []

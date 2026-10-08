@@ -234,6 +234,9 @@ class Config:
     odds_bands: tuple[tuple[float, float], ...] = (
         (1.15, 1.19), (1.20, 1.24), (1.25, 1.29))
     tips_per_band: int = 3
+    # Kdyz v pasmech neni aspon FALLBACK_MIN_TIPS prilezitosti (ani po pridani
+    # zaloznich sportu), pouziji se tahle sirsi pasma. Prazdne = nerozsirovat.
+    wide_odds_bands: tuple[tuple[float, float], ...] = ()
     # Pod hlavnimi tipy se vypisou dalsi kandidati az do LIST_PER_BAND na pasmo
     # (kratce, do statistik se nepocitaji -- ukladaji se potichu).
     list_per_band: int = 10
@@ -291,6 +294,16 @@ class Config:
     @property
     def tz(self) -> ZoneInfo:
         return ZoneInfo(self.timezone)
+
+    @property
+    def target_odds_range(self) -> tuple[float, float]:
+        """
+        Rozsah kurzu, ktery nas zajima -- vcetne sirsich pasem. Pouziva se pri
+        placenem predvyberu fotbalu, aby se neprosouhlasily zapasy, ktere by
+        se nevesly ani po rozsireni.
+        """
+        bands = list(self.odds_bands) + list(self.wide_odds_bands)
+        return min(lo for lo, _ in bands), max(hi for _, hi in bands)
 
     @property
     def primary_groups(self) -> list[str]:
@@ -356,6 +369,9 @@ class Config:
         if not self.openai_model:
             problems.append("OPENAI_MODEL nesmi byt prazdny")
         problems += _band_problems(self.odds_bands)
+        if self.wide_odds_bands:
+            problems += [p.replace("ODDS_BANDS", "WIDE_ODDS_BANDS")
+                         for p in _band_problems(self.wide_odds_bands)]
         if self.devig_method not in {"shin", "multiplicative", "power"}:
             problems.append("DEVIG_METHOD musi byt shin | multiplicative | power")
         if self.max_sport_keys < 1:
@@ -429,14 +445,15 @@ def _sport_groups(profile: str) -> list[str]:
 DEFAULT_ODDS_BANDS = "1.15-1.19,1.20-1.24,1.25-1.29"
 
 
-def _odds_bands() -> tuple[tuple[float, float], ...]:
+def _odds_bands(key: str = "ODDS_BANDS", default: str | None = None
+                ) -> tuple[tuple[float, float], ...]:
     """
     ODDS_BANDS='1.15-1.19,1.20-1.24,1.25+'
         -> ((1.15, 1.19), (1.20, 1.24), (1.25, inf))
 
     'od+' znamena pasmo bez horni hranice; smi byt jen posledni.
     """
-    raw = _str("ODDS_BANDS") or DEFAULT_ODDS_BANDS
+    raw = _str(key) or (DEFAULT_ODDS_BANDS if default is None else default)
     bands: list[tuple[float, float]] = []
     for part in raw.split(","):
         part = part.strip()
@@ -449,7 +466,7 @@ def _odds_bands() -> tuple[tuple[float, float], ...]:
                 lo, hi = (float(x.strip()) for x in part.split("-"))
         except ValueError as exc:
             raise ConfigError(
-                f"ODDS_BANDS: '{part}' neni ve tvaru od-do (1.15-1.19) "
+                f"{key}: '{part}' neni ve tvaru od-do (1.15-1.19) "
                 "ani od+ (1.25+)"
             ) from exc
         bands.append((lo, hi))
@@ -515,6 +532,7 @@ def load_config() -> Config:
         max_hours_ahead=_int("MAX_HOURS_AHEAD", 24),
         same_day_only=_bool("SAME_DAY_ONLY", False),
         odds_bands=_odds_bands(),
+        wide_odds_bands=_odds_bands("WIDE_ODDS_BANDS", ""),
         tips_per_band=_int("TIPS_PER_BAND", 3),
         list_per_band=_int("LIST_PER_BAND", 10),
         chat_prompt=_bool("CHAT_PROMPT", True),

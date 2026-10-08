@@ -716,6 +716,65 @@ def test_sport_selection() -> None:
           "18 kreditu/den" in budget and "zdarma" in budget, f"({budget})")
 
 
+def test_wide_bands() -> None:
+    print("\n[9d] Rozsireni pasma, kdyz je tipu malo")
+    import main as agent_main
+    from state import BandStats
+
+    narrow = ((1.26, 1.30),)
+    cfg = make_cfg(odds_bands=narrow, wide_odds_bands=((1.20, 1.30),),
+                   fallback_min_tips=3, tips_per_band=10, list_per_band=10)
+
+    # Tri zapasy: 1,22 / 1,24 / 1,28 -- v uzkem pasmu je jen jeden.
+    events = [
+        two_way_event("a", "FavA", "DogA", prices=(1.22,) * 4, dog_price=5.0),
+        two_way_event("b", "FavB", "DogB", prices=(1.24,) * 4, dog_price=4.6),
+        two_way_event("c", "FavC", "DogC", prices=(1.28,) * 4, dog_price=4.2),
+    ]
+    tips = analyzer.analyze(events, cfg).tips
+    check("v uzkem pasmu je jen jeden tip", agent_main.count_in_bands(tips, cfg) == 1)
+
+    wider, widened = agent_main.widen_bands_if_needed(tips, cfg)
+    check("pri nedostatku se pasmo rozsiri", widened and wider.odds_bands == ((1.20, 1.30),))
+    check("po rozsireni jsou v pasmu vsechny tri",
+          agent_main.count_in_bands(tips, wider) == 3)
+    check("puvodni nastaveni zustava nedotcene", cfg.odds_bands == narrow)
+
+    enough = make_cfg(odds_bands=narrow, wide_odds_bands=((1.20, 1.30),),
+                      fallback_min_tips=1)
+    same, widened2 = agent_main.widen_bands_if_needed(tips, enough)
+    check("kdyz tipu staci, pasmo se nerozsiruje",
+          not widened2 and same.odds_bands == narrow)
+    off, widened3 = agent_main.widen_bands_if_needed(
+        tips, make_cfg(odds_bands=narrow, fallback_min_tips=10))
+    check("bez WIDE_ODDS_BANDS se nerozsiruje nikdy",
+          not widened3 and off.odds_bands == narrow)
+
+    check("predvyber fotbalu miri i na sirsi pasmo",
+          cfg.target_odds_range == (1.20, 1.30)
+          and make_cfg(odds_bands=narrow).target_odds_range == (1.26, 1.30))
+
+    selected = analyzer.select_by_band(tips, wider)
+    stats = {"A": BandStats()}
+    msg = format_tips(analyzer.analyze(events, wider), selected, stats, [], wider,
+                      widened=True)
+    check("zprava ukazuje sirsi pasmo", "1,20–1,30" in msg, f"({msg[:200]})")
+    check("zprava rekne, ze pasmo je dnes sirsi", "sirsi" in msg)
+    check("bez rozsireni zadna poznamka",
+          "sirsi" not in format_tips(analyzer.analyze(events, wider), selected,
+                                     stats, [], wider))
+
+    def fails(**kwargs) -> str:
+        try:
+            make_cfg(**kwargs).validate(require_telegram=False)
+        except ConfigError as exc:
+            return str(exc)
+        return ""
+
+    check("neplatne WIDE_ODDS_BANDS se odchyti",
+          "WIDE_ODDS_BANDS" in fails(wide_odds_bands=((1.30, 1.20),)))
+
+
 def test_soccer_league_budget() -> None:
     print("\n[9c] Fotbal: program zdarma, kurzy jen u nekolika lig")
     from datetime import datetime as dt
@@ -1778,6 +1837,7 @@ def main() -> int:
     test_sport_selection()
     test_fallback_groups()
     test_soccer_league_budget()
+    test_wide_bands()
     test_config_validation()
     test_message()
     test_ai_ranking()
