@@ -271,10 +271,14 @@ def format_tips(
             lines += [_more_line(len(tips) + i, tip, cfg, now)
                       for i, tip in enumerate(extra, start=1)]
         if len(tips) > 1:
+            # U delsich vypisu nema smysl nasobit vsechno (deset tipu = par
+            # procent) -- pocita se jen prvni trojice, ta se da vsadit dohromady.
+            top = tips[:3]
             combined = 1.0
-            for tip in tips:
+            for tip in top:
                 combined *= tip.prob
-            lines.append(f"\U0001f9ee Vsechny {esc(len(tips))} najednou: {_pct(combined)}")
+            label = "Vsechny" if len(tips) == len(top) else "Prvni"
+            lines.append(f"\U0001f9ee {label} {esc(len(top))} najednou: {_pct(combined)}")
         lines.append(_stats_line(stats.get(key, BandStats()), cfg))
 
     if not any(selected.get(band_key(i)) for i in range(len(cfg.odds_bands))):

@@ -36,19 +36,22 @@ Jen tipy; kolik a jestli vůbec vsadíš, je na tobě.
 
 | Pásmo | Kurz | K 2× potřebuješ zhruba |
 |---|---|---|
-| 🟢 **A** | 1,15–1,19 | 5 výher v řadě (od kurzu 1,19 stačí 4) |
-| 🟠 **B** | 1,20–1,24 | 4 výhry v řadě |
-| 🔵 **C** | 1,25 a výš | 3–4 výhry v řadě (3 stačí od průměrného kurzu 1,26) |
+| 🟢 **A** | 1,26–1,30 | 3 výhry v řadě (od kurzu 1,26 těsně, od 1,30 s rezervou) |
+
+Pásem může být i víc (`ODDS_BANDS=1.15-1.19,1.20-1.24,1.25-1.29`), zpráva je
+pak rozdělí a statistiky vede zvlášť.
 
 - **Zařazení podle běžného kurzu** — tedy mediánu napříč kancelářemi, zaokrouhleného
   na setiny. Nejlepší kurz často nabízí burza (Betfair, Matchbook) a české kanceláře
   v datech nejsou, takže u své kanceláře dostaneš spíš kurz kolem mediánu.
   Nejlepší kurz je ve zprávě v závorce jako `max`.
-- **V každém pásmu tři nejvyšší šance.** Protože vyšší šance = nižší kurz, tipy se
-  drží spíš u spodní hranice pásma.
-- **Pásmo C nemá horní hranici**, ale protože se berou nejvyšší šance, tipy v něm
-  budou v praxi hlavně kolem 1,25–1,35.
-- **Tichý zbytek** — zápasy s kurzem pod 1,15 se neposílají, ale ukládají se se
+- **V každém pásmu deset nejvyšších šancí** (`TIPS_PER_BAND`). Protože vyšší
+  šance = nižší kurz, tipy se drží spíš u spodní hranice pásma.
+- **Úzké pásmo znamená málo tipů.** Rozsah 1,26–1,30 je široký jen pět setin, a
+  tím pádem ho většina zápasů mine: v měření 8. 10. 2026 padl do pásma jeden tip
+  z 37 (pod 1,20 pět, 1,20–1,25 tři, 1,31–1,40 jedenáct, nad 1,40 sedmnáct).
+  Deset tipů denně tedy čekej jen ve dnech s velkou nabídkou.
+- **Tichý zbytek** — zápasy mimo pásmo se neposílají, ale ukládají se se
   stejnými statistikami. Za pár měsíců tak půjde porovnat, jestli by si vedly
   lépe (`python main.py --status`).
 - **Změna pásem je zpětná** — pásmo se u každého tipu počítá z uloženého kurzu,
@@ -280,6 +283,19 @@ Profily: `individual` (jen tenis), `low_variance` (tenis + basketbal),
 **`core_us` (výchozí: + americký fotbal)**, `wide` (+ baseball a hokej).
 Vlastní sestavu nastavíš přes `SPORT_GROUPS` (má přednost před profilem).
 
+### Záložní sporty
+
+`FALLBACK_SPORT_GROUPS=Tennis` znamená, že tenis **není** v běžném dotazu. Agent
+nejdřív projde ostatní sporty (basketbal, házená, americký fotbal, fotbal) a teprve
+když v pásmech nenajde aspoň `FALLBACK_MIN_TIPS` (10) příležitostí, dotáhne i tenis.
+Ve dnech s dostatkem jiných zápasů tak tenis nestojí ani kredit a nabídka zůstane
+u sportů, kterým věříš víc. V logu je vidět, co se stalo:
+
+```
+V pasmech je jen 1 prilezitosti (chci 10) -- pridavam zalozni sporty: Tennis.
+Prilezitosti v pasmech: 12 -- zalozni sporty (Tennis) dnes netreba.
+```
+
 ### Sporty s remízou
 
 U házené kotují kanceláře trojcestný trh (výhra / remíza / prohra). Tip
@@ -309,7 +325,8 @@ které zrovna hrají — **soutěže mimo sezónu jsou zdarma**.
 | Výpis soutěží | 0 |
 | Kurzy (1 dotaz na soutěž se zápasy) | 1 za soutěž |
 | Dohledání výsledků | 2 za soutěž, jen když jsou nevyhodnocené tipy |
-| Fotbalové trhy 1X | 1 za zápas, nejvýš `MAX_EVENT_MARKET_LOOKUPS` (4) a jen ve dnech z `SOCCER_WEEKDAYS` |
+| Fotbalové trhy 1X | 1 za zápas, nejvýš `MAX_EVENT_MARKET_LOOKUPS` (4) |
+| Záložní sporty (tenis) | 0 ve dnech, kdy hlavní sporty dají dost tipů — vůbec se nedotazují |
 | **Reálně** | **~5–20 za den** |
 
 Soutěž bez zápasů v časovém okně **nestojí nic** — devět dotázaných soutěží
@@ -494,7 +511,7 @@ v `settings.env`.
 | Proměnná | Výchozí | Význam |
 |---|---|---|
 | `ODDS_BANDS` | `1.15-1.19,1.20-1.24,1.25-1.29` | kurzová pásma; nesmí se překrývat. Horní strop je 1,29; zápis `1.25+` by značil pásmo bez horní hranice (jen poslední) |
-| `TIPS_PER_BAND` | `3` | kolik hlavních tipů v každém pásmu (počítají se do statistik) |
+| `TIPS_PER_BAND` | `10` | kolik hlavních tipů v každém pásmu (počítají se do statistik) |
 | `LIST_PER_BAND` | `10` | kolik zápasů na pásmo vypsat celkem (hlavní tipy + další kandidáti) |
 | `CHAT_PROMPT` | `true` | druhá zpráva s hotovým textem pro chat |
 | `VIRTUAL_STAKE` | `100` | sázka pro virtuální zisk ve statistikách |
@@ -511,7 +528,9 @@ v `settings.env`.
 | `MAX_HOURS_AHEAD` | `24` | den i následující noc |
 | `TRACK_RESULTS` | `true` | hlásit, jak dopadly minulé tipy |
 | `ENABLE_SOCCER` | `true` | zapne fotbalovou větev (trhy po zápasech) |
-| `SOCCER_WEEKDAYS` | `1,2,3,4,5` | dny, kdy se fotbal tahá (1 = pondělí); prázdné = každý den |
+| `SOCCER_WEEKDAYS` | (prázdné) | dny, kdy se fotbal tahá (1 = pondělí); prázdné = každý den |
+| `FALLBACK_SPORT_GROUPS` | `Tennis` | skupiny, které se dotáhnou jen při nedostatku tipů |
+| `FALLBACK_MIN_TIPS` | `10` | kolik tipů v pásmech stačí, aby se záloha nebrala |
 | `SOCCER_MARKETS` | `double_chance` | `double_chance` (1X) a/nebo `draw_no_bet`; každý trh = 1 kredit za zápas |
 
 Jiná pásma? Například `ODDS_BANDS=1.12-1.20,1.21-1.30,1.31+`. Pásma dostanou

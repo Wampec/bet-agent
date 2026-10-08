@@ -325,25 +325,34 @@ def run(args: argparse.Namespace) -> int:
         return EXIT_OK
 
     # --- 3. dnesni nabidka -------------------------------------------------- #
+    # Nejdriv hlavni sporty (vcetne fotbalu). Zalozni skupiny (FALLBACK_SPORT_GROUPS)
+    # se dotahuji az kdyz je prilezitosti malo -- jejich kurzy pak nestoji kredity.
     try:
-        events = fetch_daily_events(client)
+        events = fetch_daily_events(client, groups=cfg.primary_groups)
     except OddsAPIError as exc:
         log.error("The Odds API: %s", exc)
         return EXIT_API
 
-    pool: list[Event] = [e for e in events if not e.is_soccer]
-    soccer = [e for e in events if e.is_soccer]
-    if cfg.enable_soccer and soccer:
-        shortlist = prefilter_soccer_events(soccer, cfg)
-        try:
-            enrich_soccer_markets(client, shortlist)
-        except OddsAPIError as exc:
-            log.error("Doplnkove trhy: %s", exc)
-        pool += shortlist[: cfg.max_event_market_lookups]
+    pool = _with_soccer_markets(client, events, cfg)
 
     # --- 4. vyber tipu ------------------------------------------------------ #
     now = datetime.now(timezone.utc)
     result = analyze(pool, cfg, now)
+    in_bands = count_in_bands(result.tips, cfg)
+    if cfg.fallback_groups and in_bands < cfg.fallback_min_tips:
+        log.info("V pasmech je jen %s prilezitosti (chci %s) -- pridavam zalozni "
+                 "sporty: %s.", in_bands, cfg.fallback_min_tips,
+                 ", ".join(cfg.fallback_groups))
+        try:
+            pool += fetch_daily_events(client, groups=cfg.fallback_groups,
+                                       include_soccer=False)
+        except OddsAPIError as exc:
+            log.error("Zalozni sporty: %s", exc)
+        else:
+            result = analyze(pool, cfg, now)
+    elif cfg.fallback_groups:
+        log.info("Prilezitosti v pasmech: %s -- zalozni sporty (%s) dnes netreba.",
+                 in_bands, ", ".join(cfg.fallback_groups))
     log.info("Spotreba API: %s", client.quota)
 
     # V kazdem pasmu TIPS_PER_BAND tipu do zpravy -- bud podle AI (z vetsiho
@@ -398,6 +407,29 @@ def run(args: argparse.Namespace) -> int:
             # Cisty text bez formatovani -- aby sel rovnou zkopirovat do chatu.
             _notify(notifier, format_chat_prompt(groups, cfg, now), parse_mode="")
     return EXIT_OK
+
+
+def _with_soccer_markets(
+    client: OddsAPIClient, events: list[Event], cfg: Config
+) -> list[Event]:
+    """Fotbalovym kandidatum dotahne trhy 1X / DNB (placene po zapasech)."""
+    pool: list[Event] = [e for e in events if not e.is_soccer]
+    soccer = [e for e in events if e.is_soccer]
+    if cfg.enable_soccer and soccer:
+        shortlist = prefilter_soccer_events(soccer, cfg)
+        try:
+            enrich_soccer_markets(client, shortlist)
+        except OddsAPIError as exc:
+            log.error("Doplnkove trhy: %s", exc)
+        pool += shortlist[: cfg.max_event_market_lookups]
+    return pool
+
+
+def count_in_bands(tips: list[Tip], cfg: Config) -> int:
+    """Kolik tipu padlo do kurzovych pasem (ne pod ne nad)."""
+    keys = {band_key(i) for i in range(len(cfg.odds_bands))}
+    return sum(1 for tip in tips
+               if band_for_odds(tip.typical_odds, cfg.odds_bands) in keys)
 
 
 def more_candidates(

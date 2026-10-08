@@ -171,6 +171,11 @@ class Config:
     tennis_tier_keywords: list[str] = field(
         default_factory=lambda: list(TENNIS_TOP_TIER_KEYWORDS)
     )
+    # Zalozni skupiny: dotahuji se AZ kdyz ostatni sporty nedaji aspon
+    # FALLBACK_MIN_TIPS prilezitosti v pasmech. Setri kredity a drzi nabidku
+    # u sportu, kterym veris vic.
+    fallback_groups: list[str] = field(default_factory=lambda: ["Tennis"])
+    fallback_min_tips: int = 10
     sport_key_whitelist: list[str] = field(default_factory=list)
     sport_key_blacklist: list[str] = field(default_factory=list)
 
@@ -266,6 +271,12 @@ class Config:
     def tz(self) -> ZoneInfo:
         return ZoneInfo(self.timezone)
 
+    @property
+    def primary_groups(self) -> list[str]:
+        """Skupiny, ktere se dotahuji vzdy (vse krome zaloznich)."""
+        fallback = {g.lower() for g in self.fallback_groups}
+        return [g for g in self.sport_groups if g.lower() not in fallback]
+
     def soccer_today(self, now: datetime | None = None) -> bool:
         """Ma se dnes fotbal dotahovat? (SOCCER_WEEKDAYS)"""
         if not self.enable_soccer:
@@ -295,6 +306,8 @@ class Config:
             problems.append("MIN_TIP_PROB musi byt v intervalu [0, 1)")
         if self.virtual_stake <= 0:
             problems.append("VIRTUAL_STAKE musi byt > 0")
+        if self.fallback_min_tips < 0:
+            problems.append("FALLBACK_MIN_TIPS nesmi byt zaporne")
         if self.list_per_band < self.tips_per_band:
             problems.append("LIST_PER_BAND musi byt >= TIPS_PER_BAND")
         if self.ai_ranking and self.ai_pool_per_band < self.tips_per_band:
@@ -464,6 +477,8 @@ def load_config() -> Config:
         sport_profile=profile,
         sport_groups=_sport_groups(profile),
         tennis_top_tier_only=_bool("TENNIS_TOP_TIER_ONLY", False),
+        fallback_groups=_csv("FALLBACK_SPORT_GROUPS", "Tennis"),
+        fallback_min_tips=_int("FALLBACK_MIN_TIPS", 10),
         sport_key_whitelist=_csv("SPORT_KEY_WHITELIST"),
         sport_key_blacklist=_csv("SPORT_KEY_BLACKLIST"),
         enable_soccer=enable_soccer,

@@ -27,7 +27,7 @@ import time
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from datetime import datetime, timedelta, timezone
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 import requests
 
@@ -189,13 +189,14 @@ class OddsAPIClient:
         """SPORT_KEY_BLACKLIST: presny klic, nebo vzor s hvezdickou (tennis_wta_*)."""
         return any(fnmatch(key, pattern) for pattern in self.cfg.sport_key_blacklist)
 
-    def select_sport_keys(self) -> list[str]:
+    def select_sport_keys(self, groups: Sequence[str] | None = None) -> list[str]:
         """
-        Vybere souteze k dotazu podle SPORT_GROUPS, serazene podle priority
-        a orezane na MAX_SPORT_KEYS. Vysledek primo urcuje spotrebu kreditu.
+        Vybere souteze k dotazu podle SPORT_GROUPS (nebo predanych `groups`),
+        serazene podle priority a orezane na MAX_SPORT_KEYS. Vysledek primo
+        urcuje spotrebu kreditu.
         """
         cfg = self.cfg
-        wanted = {g.lower() for g in cfg.sport_groups}
+        wanted = {g.lower() for g in (groups if groups is not None else cfg.sport_groups)}
 
         if cfg.sport_key_whitelist:
             available = {s["key"] for s in self.list_sports()}
@@ -376,10 +377,17 @@ def merge_markets(event: Event, payload: dict[str, Any]) -> None:
                 bucket.append(entry)
 
 
-def fetch_daily_events(client: OddsAPIClient, now: datetime | None = None) -> list[Event]:
+def fetch_daily_events(
+    client: OddsAPIClient,
+    now: datetime | None = None,
+    *,
+    groups: Sequence[str] | None = None,
+    include_soccer: bool = True,
+) -> list[Event]:
     """
     Stahne dnesni zapasy vybranych sportu se zakladnim trhem h2h.
     Fotbalove odvozene trhy se dotahuji az v enrich_soccer_markets().
+    `groups` omezi dotaz na dane skupiny (pouziva se pro zalozni sporty).
     """
     cfg = client.cfg
     time_from, time_to = day_window(cfg, now)
@@ -391,15 +399,18 @@ def fetch_daily_events(client: OddsAPIClient, now: datetime | None = None) -> li
     )
 
     sport_meta = {s["key"]: s for s in client.list_sports()}
-    sport_keys = client.select_sport_keys()
+    sport_keys = client.select_sport_keys(groups)
     if sport_keys:
         log.info("Souteze k dotazu (%s): %s", len(sport_keys), ", ".join(sport_keys))
     else:
         log.warning(
-            "Zadna soutez ze skupin %s prave nebezi.", ", ".join(cfg.sport_groups)
+            "Zadna soutez ze skupin %s prave nebezi.",
+            ", ".join(groups if groups is not None else cfg.sport_groups)
         )
 
-    if cfg.enable_soccer and not cfg.soccer_today(now):
+    if not include_soccer:
+        pass
+    elif cfg.enable_soccer and not cfg.soccer_today(now):
         log.info("Fotbal se dnes nedotahuje (SOCCER_WEEKDAYS=%s).",
                  ",".join(str(d) for d in cfg.soccer_weekdays))
     elif cfg.enable_soccer:

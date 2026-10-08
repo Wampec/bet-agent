@@ -716,6 +716,58 @@ def test_sport_selection() -> None:
           "18 kreditu/den" in budget and "zdarma" in budget, f"({budget})")
 
 
+def test_fallback_groups() -> None:
+    print("\n[9b] Zalozni sporty (tenis az kdyz je prilezitosti malo)")
+    import main as agent_main
+
+    cfg = make_cfg(sport_groups=["Tennis", "Basketball", "Handball"],
+                   fallback_groups=["Tennis"], fallback_min_tips=10)
+    check("hlavni sporty jsou bez zaloznich",
+          cfg.primary_groups == ["Basketball", "Handball"], f"({cfg.primary_groups})")
+    check("prazdna zaloha = vsechno je hlavni",
+          make_cfg(fallback_groups=[]).primary_groups
+          == make_cfg().sport_groups)
+    check("velikost pismen nerozhoduje",
+          make_cfg(sport_groups=["Tennis", "Basketball"],
+                   fallback_groups=["tennis"]).primary_groups == ["Basketball"])
+
+    sports = [
+        {"key": "tennis_atp_us_open", "group": "Tennis", "active": True,
+         "has_outrights": False},
+        {"key": "basketball_nba", "group": "Basketball", "active": True,
+         "has_outrights": False},
+    ]
+    client = OddsAPIClient(cfg)
+    client._sports_cache = sports
+    check("dotaz jen na hlavni sporty vynecha tenis",
+          client.select_sport_keys(cfg.primary_groups) == ["basketball_nba"])
+    check("dotaz na zalohu vezme jen tenis",
+          client.select_sport_keys(cfg.fallback_groups) == ["tennis_atp_us_open"])
+    check("bez omezeni se bere vse",
+          len(client.select_sport_keys()) == 2)
+
+    # count_in_bands pocita jen tipy v pasmech (ne pod, ne nad)
+    band_cfg = make_cfg(odds_bands=((1.26, 1.30),))
+    events = [two_way_event("in1", "FavIn", "DogIn", prices=(1.28,) * 4, dog_price=4.0),
+              two_way_event("low", "FavLow", "DogLow", prices=(1.10,) * 4, dog_price=9.0),
+              two_way_event("high", "FavHigh", "DogHigh", prices=(1.60,) * 4, dog_price=2.4)]
+    tips = analyzer.analyze(events, band_cfg).tips
+    check("v pasmu 1,26-1,30 je jen jeden z trech tipu",
+          agent_main.count_in_bands(tips, band_cfg) == 1,
+          f"({[round(t.typical_odds, 2) for t in tips]})")
+
+    from state import BandStats
+    result, pool = ai_pool(make_cfg())
+    many = {"A": pool["A"][:5], "B": [], "C": []}
+    stats = {"A": BandStats(), "B": BandStats(), "C": BandStats()}
+    msg = format_tips(result, many, stats, [], make_cfg())
+    check("u delsiho vypisu se nasobi jen prvni trojice",
+          "Prvni 3 najednou" in msg and "Vsechny 5 najednou" not in msg)
+    few = {"A": pool["A"][:2], "B": [], "C": []}
+    check("u dvou tipu zustava 'Vsechny 2'",
+          "Vsechny 2 najednou" in format_tips(result, few, stats, [], make_cfg()))
+
+
 def test_config_validation() -> None:
     print("\n[10] Validace konfigurace")
 
@@ -1669,6 +1721,7 @@ def main() -> int:
     test_tip_log()
     test_evaluate_score()
     test_sport_selection()
+    test_fallback_groups()
     test_config_validation()
     test_message()
     test_ai_ranking()
