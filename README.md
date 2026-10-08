@@ -276,7 +276,7 @@ vrátí k pořadí podle kurzů a přestaneš za AI platit.
 | **Házená** | **trojcestný** | Remíza je možná (bývá 3–8 %) a je to **prohraná sázka**. Spočtená šance to už zohledňuje, tip je ve zprávě označený. |
 | **Americký fotbal** | dvoucestný | Hodně výrazných favoritů, hlavně v univerzitní lize (NCAAF): v týdenním testu padlo do pásem 19 zápasů se šancí 80–85 %. Hraje se ale skoro jen v sobotu (NFL v neděli a v noci na pondělí), takže ve zbytku týdne nenabídne nic. Sezóna září–leden. |
 | Baseball, hokej | dvoucestný | Jen v profilu `wide`. Výrazné favority mají vzácněji — v testu nepadl do pásem ani jeden zápas. |
-| **Fotbal** | **1X (dvojitá šance)** | Zapnutý kvůli všedním dnům (evropské poháry hrají Út–Čt). Výhra favorita se do pásem vejde zřídka, ale tip „favorit vyhraje nebo remizuje" často: v testu Serie A padlo do pásem 6 z 10 zápasů. Potřebuje dotažení trhu po zápasech (1 kredit za zápas), proto se tahá jen ve dnech podle `SOCCER_WEEKDAYS` a jen u `MAX_EVENT_MARKET_LOOKUPS` nejvhodnějších zápasů. |
+| **Fotbal** | **1X (dvojitá šance)** | **Všechny aktivní ligy** (`SOCCER_LEAGUE_WHITELIST=ALL`, aktuálně 48 — od Ligy mistrů po Brazílii, Japonsko nebo Finsko), takže fotbal hraje každý den. Výhra favorita se do pásma vejde zřídka, tip „favorit vyhraje nebo remizuje" podstatně častěji. |
 
 Profily: `individual` (jen tenis), `low_variance` (tenis + basketbal),
 `core` (tenis + basketbal + házená),
@@ -325,12 +325,17 @@ které zrovna hrají — **soutěže mimo sezónu jsou zdarma**.
 | Výpis soutěží | 0 |
 | Kurzy (1 dotaz na soutěž se zápasy) | 1 za soutěž |
 | Dohledání výsledků | 2 za soutěž, jen když jsou nevyhodnocené tipy |
-| Fotbalové trhy 1X | 1 za zápas, nejvýš `MAX_EVENT_MARKET_LOOKUPS` (4) |
+| Program fotbalových soutěží | **0** — endpoint `/events` je zdarma |
+| Fotbalové kurzy | 1 za ligu, která dnes hraje, nejvýš `SOCCER_MAX_LEAGUES` (6) |
+| Fotbalové trhy 1X | 1 za zápas, nejvýš `MAX_EVENT_MARKET_LOOKUPS` (3) |
 | Záložní sporty (tenis) | 0 ve dnech, kdy hlavní sporty dají dost tipů — vůbec se nedotazují |
 | **Reálně** | **~5–20 za den** |
 
 Soutěž bez zápasů v časovém okně **nestojí nic** — devět dotázaných soutěží
-v testu sebralo jen 4 kredity. Proto je seznam fotbalových lig klidně delší.
+v testu sebralo jen 4 kredity. U fotbalu jde agent ještě dál: program všech
+48 lig si projde zdarma (`/events`) a kurzy koupí jen u těch, které dnes
+opravdu hrají, nejvýš u `SOCCER_MAX_LEAGUES`. V měření 8. 10. 2026 hrálo
+7 lig ze 48, takže sken nestál nic a zaplatilo se za 6.
 Předvýběr fotbalu navíc míří do pásem: u největších favoritů je dvojitá šance
 kolem 1,02, což by byl vyhozený kredit, takže se dotahují zápasy s 1X zhruba
 mezi 1,15 a 1,29.
@@ -532,6 +537,8 @@ v `settings.env`.
 | `FALLBACK_SPORT_GROUPS` | `Tennis` | skupiny, které se dotáhnou jen při nedostatku tipů |
 | `FALLBACK_MIN_TIPS` | `10` | kolik tipů v pásmech stačí, aby se záloha nebrala |
 | `SOCCER_MARKETS` | `double_chance` | `double_chance` (1X) a/nebo `draw_no_bet`; každý trh = 1 kredit za zápas |
+| `SOCCER_LEAGUE_WHITELIST` | `ALL` | `ALL` = všechny ligy, prázdné = šest největších, nebo vlastní klíče |
+| `SOCCER_MAX_LEAGUES` | `6` | kolik hrajících lig denně smí stát kredity (přednost mají poháry a top ligy) |
 
 Jiná pásma? Například `ODDS_BANDS=1.12-1.20,1.21-1.30,1.31+`. Pásma dostanou
 postupně zelenou, oranžovou, modrou a fialovou ikonu. Víc tipů? Zvyš `TIPS_PER_BAND`.

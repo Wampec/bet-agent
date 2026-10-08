@@ -716,6 +716,61 @@ def test_sport_selection() -> None:
           "18 kreditu/den" in budget and "zdarma" in budget, f"({budget})")
 
 
+def test_soccer_league_budget() -> None:
+    print("\n[9c] Fotbal: program zdarma, kurzy jen u nekolika lig")
+    from datetime import datetime as dt
+
+    sports = [{"key": k, "group": "Soccer", "active": True, "has_outrights": False}
+              for k in ("soccer_uefa_champs_league", "soccer_epl", "soccer_brazil_campeonato",
+                        "soccer_japan_j_league", "soccer_china_superleague")]
+    schedule = {                       # kolik zapasu liga v okne ma
+        "soccer_uefa_champs_league": 0,            # dnes nehraje
+        "soccer_epl": 2,
+        "soccer_brazil_campeonato": 6,
+        "soccer_japan_j_league": 4,
+        "soccer_china_superleague": 1,
+    }
+
+    class Client(OddsAPIClient):
+        def __init__(self, cfg):
+            super().__init__(cfg)
+            self._sports_cache = sports
+            self.asked: list[str] = []
+
+        def list_events(self, sport_key, time_from, time_to):
+            self.asked.append(sport_key)
+            return [{"id": f"{sport_key}-{i}"} for i in range(schedule[sport_key])]
+
+    cfg = make_cfg(enable_soccer=True, soccer_league_whitelist=[], soccer_max_leagues=3)
+    client = Client(cfg)
+    now = dt(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
+    chosen = client.soccer_keys_to_pay_for(now, now + timedelta(hours=24))
+    check("program se zjistuje u vsech lig (je zdarma)", len(client.asked) == 5,
+          f"({client.asked})")
+    check("liga bez zapasu se neplati",
+          "soccer_uefa_champs_league" not in chosen, f"({chosen})")
+    check("strop SOCCER_MAX_LEAGUES se dodrzi", len(chosen) == 3, f"({chosen})")
+    check("prednost ma prioritni liga (EPL) pred vetsi nabidkou",
+          chosen[0] == "soccer_epl", f"({chosen})")
+    check("za prioritnimi ligami jdou ty s nejvic zapasy",
+          chosen[1:] == ["soccer_brazil_campeonato", "soccer_japan_j_league"], f"({chosen})")
+
+    vyssi = Client(make_cfg(enable_soccer=True, soccer_league_whitelist=[],
+                            soccer_max_leagues=10))
+    check("vyssi strop pusti vsechny hrajici ligy",
+          len(vyssi.soccer_keys_to_pay_for(now, now + timedelta(hours=24))) == 4)
+
+    def fails(**kwargs) -> str:
+        try:
+            make_cfg(**kwargs).validate(require_telegram=False)
+        except ConfigError as exc:
+            return str(exc)
+        return ""
+
+    check("SOCCER_MAX_LEAGUES 0 se odchyti",
+          "SOCCER_MAX_LEAGUES" in fails(soccer_max_leagues=0))
+
+
 def test_fallback_groups() -> None:
     print("\n[9b] Zalozni sporty (tenis az kdyz je prilezitosti malo)")
     import main as agent_main
@@ -1722,6 +1777,7 @@ def main() -> int:
     test_evaluate_score()
     test_sport_selection()
     test_fallback_groups()
+    test_soccer_league_budget()
     test_config_validation()
     test_message()
     test_ai_ranking()

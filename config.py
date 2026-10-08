@@ -87,6 +87,21 @@ DEFAULT_SOCCER_LEAGUES: tuple[str, ...] = (
     "soccer_uefa_champs_league",
 )
 
+# Kdyz je fotbalovych lig s zapasy vic nez SOCCER_MAX_LEAGUES, prednost maji
+# tyhle (evropske pohary a nejsledovanejsi ligy), pak ligy s nejvic zapasy.
+SOCCER_PRIORITY_LEAGUES: tuple[str, ...] = (
+    "soccer_uefa_champs_league",
+    "soccer_uefa_europa_league",
+    "soccer_uefa_europa_conference_league",
+    "soccer_epl",
+    "soccer_spain_la_liga",
+    "soccer_italy_serie_a",
+    "soccer_germany_bundesliga",
+    "soccer_france_ligue_one",
+    "soccer_england_efl_cup",
+    "soccer_germany_dfb_pokal",
+)
+
 TENNIS_TOP_TIER_KEYWORDS: tuple[str, ...] = (
     "aus_open", "french_open", "wimbledon", "us_open",
     "indian_wells", "miami_open", "monte_carlo", "madrid_open",
@@ -185,6 +200,12 @@ class Config:
     # Prazdne = kazdy den. O vikendu uz tipy davaji ostatni sporty, takze
     # omezeni na vsedni dny setri kredity tam, kde nejsou potreba.
     soccer_weekdays: list[int] = field(default_factory=list)
+    # Kolik fotbalovych lig smi za den stat kredity. Program soutezi se
+    # zjistuje zdarma, takze se platí jen ligy, ktere dnes opravdu hraji --
+    # a nejvys tenhle pocet (prednost maji SOCCER_PRIORITY_LEAGUES).
+    soccer_max_leagues: int = 12
+    soccer_priority_leagues: list[str] = field(
+        default_factory=lambda: list(SOCCER_PRIORITY_LEAGUES))
     soccer_markets: list[str] = field(
         default_factory=lambda: ["double_chance", "draw_no_bet"]
     )
@@ -306,6 +327,8 @@ class Config:
             problems.append("MIN_TIP_PROB musi byt v intervalu [0, 1)")
         if self.virtual_stake <= 0:
             problems.append("VIRTUAL_STAKE musi byt > 0")
+        if self.soccer_max_leagues < 1:
+            problems.append("SOCCER_MAX_LEAGUES musi byt >= 1")
         if self.fallback_min_tips < 0:
             problems.append("FALLBACK_MIN_TIPS nesmi byt zaporne")
         if self.list_per_band < self.tips_per_band:
@@ -358,7 +381,7 @@ class Config:
         soccer = 0
         if self.enable_soccer:
             soccer = (
-                len(self.soccer_league_whitelist) * regions
+                self.soccer_max_leagues * regions
                 + self.max_event_market_lookups * len(self.soccer_markets) * regions
             )
         # Vysledky se stahuji po soutezich (2 kredity za soutez), ne po tipech.
@@ -484,6 +507,7 @@ def load_config() -> Config:
         enable_soccer=enable_soccer,
         soccer_home_favourite_only=_bool("SOCCER_HOME_FAVOURITE_ONLY", True),
         soccer_weekdays=_weekdays(),
+        soccer_max_leagues=_int("SOCCER_MAX_LEAGUES", 12),
         soccer_markets=_csv("SOCCER_MARKETS", "double_chance,draw_no_bet"),
         soccer_league_whitelist=_soccer_leagues(),
         timezone=_str("TIMEZONE", "Europe/Prague"),

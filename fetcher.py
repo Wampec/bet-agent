@@ -258,6 +258,47 @@ class OddsAPIClient:
             log.info("Liga '%s' neni prave ted aktivni -- preskakuji.", missing)
         return keys
 
+    def list_events(
+        self, sport_key: str, time_from: datetime, time_to: datetime
+    ) -> list[dict[str, Any]]:
+        """
+        Program soutezi bez kurzu. Endpoint /events je ZDARMA (0 kreditu),
+        takze se da dopredu zjistit, kde se dnes vubec hraje.
+        """
+        params = {
+            "commenceTimeFrom": _iso_z(time_from),
+            "commenceTimeTo": _iso_z(time_to),
+        }
+        return self._get(f"/sports/{sport_key}/events", params) or []
+
+    def soccer_keys_to_pay_for(
+        self, time_from: datetime, time_to: datetime
+    ) -> list[str]:
+        """
+        Z fotbalovych lig vybere ty, za ktere se vyplati zaplatit kurzy:
+        nejdriv zdarma zjisti, kde se v okne hraje, a pak necha nejvys
+        SOCCER_MAX_LEAGUES (prednost maji SOCCER_PRIORITY_LEAGUES, potom
+        ligy s nejvic zapasy).
+        """
+        cfg = self.cfg
+        priority = {key: index for index, key in enumerate(cfg.soccer_priority_leagues)}
+        scored: list[tuple[int, int, str]] = []
+        for key in self.soccer_sport_keys():
+            try:
+                events = self.list_events(key, time_from, time_to)
+            except OddsAPIError as exc:
+                log.warning("Program ligy '%s' se nepodarilo zjistit: %s", key, exc)
+                continue
+            if events:
+                scored.append((priority.get(key, len(priority)), -len(events), key))
+        scored.sort()
+        chosen = [key for _, _, key in scored[: cfg.soccer_max_leagues]]
+        if len(scored) > len(chosen):
+            log.info("Fotbal: hraje se v %s ligach, strop SOCCER_MAX_LEAGUES=%s "
+                     "-- beru %s s nejvetsi nabidkou.",
+                     len(scored), cfg.soccer_max_leagues, len(chosen))
+        return chosen
+
     def _is_top_tier_tennis(self, sport_key: str) -> bool:
         haystack = sport_key.lower()
         return any(kw.lower() in haystack for kw in self.cfg.tennis_tier_keywords)
@@ -414,8 +455,8 @@ def fetch_daily_events(
         log.info("Fotbal se dnes nedotahuje (SOCCER_WEEKDAYS=%s).",
                  ",".join(str(d) for d in cfg.soccer_weekdays))
     elif cfg.enable_soccer:
-        soccer_keys = client.soccer_sport_keys()
-        log.info("Fotbalovych lig k dotazu: %s", len(soccer_keys))
+        soccer_keys = client.soccer_keys_to_pay_for(time_from, time_to)
+        log.info("Fotbalovych lig s zapasy v okne: %s", len(soccer_keys))
         sport_keys = sport_keys + soccer_keys
 
     events: list[Event] = []
