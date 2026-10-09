@@ -53,9 +53,10 @@ STAGE_BOOKMAKERS = "malo kancelari"
 STAGE_DISAGREEMENT = "kancelare se neshodnou"
 STAGE_TIME = "prilis pozde"
 STAGE_LOW_PROB = "nizka sance"
+STAGE_AWAY = "favorit venku"
 STAGE_ORDER = (
     STAGE_MARKET, STAGE_BOOKMAKERS, STAGE_DISAGREEMENT,
-    STAGE_TIME, STAGE_LOW_PROB,
+    STAGE_TIME, STAGE_LOW_PROB, STAGE_AWAY,
 )
 
 
@@ -581,6 +582,12 @@ def check_tip(
         return STAGE_LOW_PROB, (
             f"sance {tip.prob:.1%} < pozadovanych {cfg.min_tip_prob:.1%}"
         )
+    # Tymovy favorit venku: v deniku padaji velci favorite skoro jen venku
+    # (domaci prostredi je jedna z mala veci, kterou kurz neoceni uplne).
+    # Tenis nema "doma", tam se filtr nepouzije.
+    if (cfg.favourite_home_only and not tip.event.is_tennis
+            and tip.pick_team != tip.event.home_team):
+        return STAGE_AWAY, f"{tip.pick_team} hraje venku"
     return None
 
 

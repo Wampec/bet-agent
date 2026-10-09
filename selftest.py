@@ -399,6 +399,32 @@ def test_reliability_checks() -> None:
           any(r.stage == analyzer.STAGE_LOW_PROB for r in weak.rejections))
 
 
+def test_home_only() -> None:
+    print("\n[5b] Jen tymovi favorite doma (FAVOURITE_HOME_ONLY)")
+    home_fav = make_event("h1", "basketball_nba", "Basketball", "Celtics", "Wizards")
+    for name in "ABCD":
+        add_market(home_fav, name, "h2h", {"Celtics": 1.10, "Wizards": 7.0})
+    away_fav = make_event("a1", "basketball_nba", "Basketball", "Wizards", "Celtics")
+    for name in "ABCD":
+        add_market(away_fav, name, "h2h", {"Wizards": 7.0, "Celtics": 1.10})
+    tennis = two_way_event("t1", "Sinner", "Qualifier", prices=(1.10,) * 4, dog_price=7.0)
+
+    strict = make_cfg(favourite_home_only=True)
+    result = analyzer.analyze([home_fav, away_fav, tennis], strict)
+    picks = {t.selection for t in result.tips}
+    check("favorit doma projde", "Celtics" in picks and any(
+        t.pick_team == t.event.home_team for t in result.tips if t.selection == "Celtics"))
+    check("favorit venku se vyradi",
+          sum(1 for t in result.tips if t.selection == "Celtics") == 1
+          and any(r.stage == analyzer.STAGE_AWAY for r in result.rejections),
+          f"({[r.reason for r in result.rejections]})")
+    check("tenis se filtrem neridi (nema 'doma')", "Sinner" in picks)
+    check("duvod vyrazeni je ve funnelu", "favorit venku" in result.funnel_line())
+
+    loose = analyzer.analyze([home_fav, away_fav, tennis], make_cfg())
+    check("bez filtru projde i favorit venku", len(loose.tips) == 3)
+
+
 def test_three_way_markets() -> None:
     print("\n[5b] Trojcestny trh (hazena)")
     cfg = make_cfg()
@@ -1828,6 +1854,7 @@ def main() -> int:
     test_bands()
     test_band_stats()
     test_reliability_checks()
+    test_home_only()
     test_three_way_markets()
     test_mixed_market_structures()
     test_soccer_tip()

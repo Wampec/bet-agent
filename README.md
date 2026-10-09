@@ -36,14 +36,33 @@ Jen tipy; kolik a jestli vůbec vsadíš, je na tobě.
 
 | Pásmo | Kurz | K 2× potřebuješ zhruba |
 |---|---|---|
-| 🟢 **A** | 1,26–1,30 | 3 výhry v řadě (od kurzu 1,26 těsně, od 1,30 s rezervou) |
+| 🟢 **A** | 1,03–1,12 | 7–24 výher v řadě — tohle pásmo nehoní 2×, honí jistotu |
+
+**Režim „tutovky".** Rozbor deníku ze září–října 2026 (177 vyhodnocených
+tipů) ukázal, že kurzy jsou přesně kalibrované: v pásmu 1,20–1,40 prohrává
+každý čtvrtý tip, ať se vybírá jakkoli, a žádný filtr nad kurzy to nezmění.
+Vysokou úspěšnost mají jen opravdu krátké kurzy: do 1,15 vyšlo 36/39,
+a všechny tři prohry měly společný znak — dva tenis (WTA), jedna týmový favorit
+venku. Týmoví favorité doma: 12/12. Z toho plyne nastavení:
+
+- kurz 1,03–1,12 (`ODDS_BANDS`), při malé nabídce až 1,15 (`WIDE_ODDS_BANDS`),
+- jen týmoví favorité doma (`FAVOURITE_HOME_ONLY=true`), fotbal jako „domácí
+  favorit neprohraje" (1X),
+- bez ženského tenisu, přípravy, letní ligy a exhibic (`SPORT_KEY_BLACKLIST`),
+- mužský tenis jen jako záloha, když je tipů málo (`FALLBACK_SPORT_GROUPS`).
+
+Cena za jistotu: zdvojnásobení vkladu sérií sázek při kurzu 1,08 vyžaduje
+9 výher v řadě a vyjde zhruba ve 36 % případů; při kurzu 1,28 jsou to 3 výhry
+a 43 %. Série „jistých" sázek tedy není bezpečnější cesta k 2× než jedna
+sázka — jen platí marži vícekrát. Tenhle režim dává smysl, když je cílem co
+nejvyšší podíl správných tipů, ne rychlé zdvojnásobení.
 
 Pásem může být i víc (`ODDS_BANDS=1.15-1.19,1.20-1.24,1.25-1.29`), zpráva je
 pak rozdělí a statistiky vede zvlášť.
 
 **Když je tipů málo, pásmo se pro ten den rozšíří** na `WIDE_ODDS_BANDS`
-(1,20–1,30). Spustí se to, až když v původním pásmu není aspoň
-`FALLBACK_MIN_TIPS` (10) příležitostí — a to i po přidání záložních sportů.
+(1,03–1,15). Spustí se to, až když v původním pásmu není aspoň
+`FALLBACK_MIN_TIPS` (5) příležitostí — a to i po přidání záložních sportů.
 Zpráva pak ukáže širší rozsah a připíše, že pásmo je dnes širší.
 
 - **Zařazení podle běžného kurzu** — tedy mediánu napříč kancelářemi, zaokrouhleného
@@ -52,10 +71,10 @@ Zpráva pak ukáže širší rozsah a připíše, že pásmo je dnes širší.
   Nejlepší kurz je ve zprávě v závorce jako `max`.
 - **V každém pásmu deset nejvyšších šancí** (`TIPS_PER_BAND`). Protože vyšší
   šance = nižší kurz, tipy se drží spíš u spodní hranice pásma.
-- **Úzké pásmo znamená málo tipů.** Rozsah 1,26–1,30 je široký jen pět setin, a
-  tím pádem ho většina zápasů mine: v měření 8. 10. 2026 padl do pásma jeden tip
-  z 37 (pod 1,20 pět, 1,20–1,25 tři, 1,31–1,40 jedenáct, nad 1,40 sedmnáct).
-  Proto se v takové dny pásmo samo rozšíří na 1,20–1,30 (viz výše).
+- **Krátké kurzy znamenají málo tipů.** Týmových favoritů doma s kurzem do
+  1,15 vidí deník zhruba jednoho za dva dny; s fotbalem (1X ve 48 ligách)
+  a od října s NBA jich bude víc, ale deset denně čekej jen o víkendech.
+  V chudé dny se pásmo samo rozšíří na 1,03–1,15 (viz výše).
 - **Tichý zbytek** — zápasy mimo pásmo se neposílají, ale ukládají se se
   stejnými statistikami. Za pár měsíců tak půjde porovnat, jestli by si vedly
   lépe (`python main.py --status`).
@@ -520,16 +539,17 @@ v `settings.env`.
 
 | Proměnná | Výchozí | Význam |
 |---|---|---|
-| `ODDS_BANDS` | `1.15-1.19,1.20-1.24,1.25-1.29` | kurzová pásma; nesmí se překrývat. Horní strop je 1,29; zápis `1.25+` by značil pásmo bez horní hranice (jen poslední) |
+| `ODDS_BANDS` | `1.03-1.12` | kurzová pásma; nesmí se překrývat. Zápis `1.25+` by značil pásmo bez horní hranice (jen poslední) |
 | `TIPS_PER_BAND` | `10` | kolik hlavních tipů v každém pásmu (počítají se do statistik) |
 | `LIST_PER_BAND` | `10` | kolik zápasů na pásmo vypsat celkem (hlavní tipy + další kandidáti) |
-| `WIDE_ODDS_BANDS` | `1.20-1.30` | širší pásmo pro dny s malou nabídkou; prázdné = nerozšiřovat |
+| `WIDE_ODDS_BANDS` | `1.03-1.15` | širší pásmo pro dny s malou nabídkou; prázdné = nerozšiřovat |
 | `CHAT_PROMPT` | `true` | druhá zpráva s hotovým textem pro chat |
 | `VIRTUAL_STAKE` | `100` | sázka pro virtuální zisk ve statistikách |
 | `MIN_TIP_PROB` | `0.0` | tvrdý práh šance; `0` = bez prahu |
+| `FAVOURITE_HOME_ONLY` | `true` | jen týmoví favorité doma (tenis se netýká) |
 | `SPORT_PROFILE` | `core_us` | `individual` \| `low_variance` \| `core` \| `core_us` \| `wide` |
 | `SPORT_GROUPS` | (prázdné) | vlastní seznam skupin; má přednost před profilem |
-| `SPORT_KEY_BLACKLIST` | `tennis_wta_*` | vyřazené soutěže; smí být vzor s hvězdičkou |
+| `SPORT_KEY_BLACKLIST` | `tennis_wta_*,*preseason*,*summer_league*,*all_stars*` | vyřazené soutěže; smí být vzor s hvězdičkou |
 | `MAX_SPORT_KEYS` | `12` | strop počtu dotazovaných soutěží |
 | `ODDS_REGIONS` | `eu` | víc regionů = víc kanceláří i kreditů |
 | `MIN_BOOKMAKERS` | `4` | míň kanceláří = odhadu nevěřit |
@@ -541,7 +561,7 @@ v `settings.env`.
 | `ENABLE_SOCCER` | `true` | zapne fotbalovou větev (trhy po zápasech) |
 | `SOCCER_WEEKDAYS` | (prázdné) | dny, kdy se fotbal tahá (1 = pondělí); prázdné = každý den |
 | `FALLBACK_SPORT_GROUPS` | `Tennis` | skupiny, které se dotáhnou jen při nedostatku tipů |
-| `FALLBACK_MIN_TIPS` | `10` | kolik tipů v pásmech stačí, aby se záloha nebrala |
+| `FALLBACK_MIN_TIPS` | `5` | kolik tipů v pásmech stačí, aby se záloha nebrala |
 | `SOCCER_MARKETS` | `double_chance` | `double_chance` (1X) a/nebo `draw_no_bet`; každý trh = 1 kredit za zápas |
 | `SOCCER_LEAGUE_WHITELIST` | `ALL` | `ALL` = všechny ligy, prázdné = šest největších, nebo vlastní klíče |
 | `SOCCER_MAX_LEAGUES` | `6` | kolik hrajících lig denně smí stát kredity (přednost mají poháry a top ligy) |

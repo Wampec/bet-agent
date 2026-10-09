@@ -248,6 +248,9 @@ class Config:
     virtual_stake: float = 100.0
     # Tvrdy prah -- zapasy pod nim se vubec nenabizeji. 0 = bez prahu.
     min_tip_prob: float = 0.0
+    # Jen tymovi favorite DOMA (tenis se netyka). V deniku prohrali velci
+    # favorite do 1,15 skoro jen venku nebo v tenise; doma 12/12.
+    favourite_home_only: bool = False
 
     # --- AI preporadani (debata dvou agentu) ------------------------------ #
     # Z kazdeho pasma se vezme AI_POOL_PER_BAND kandidatu (vic nez se zobrazi).
@@ -538,6 +541,7 @@ def load_config() -> Config:
         chat_prompt=_bool("CHAT_PROMPT", True),
         virtual_stake=_float("VIRTUAL_STAKE", 100.0),
         min_tip_prob=_float("MIN_TIP_PROB", 0.0),
+        favourite_home_only=_bool("FAVOURITE_HOME_ONLY", False),
         ai_ranking=_bool("AI_RANKING", False),
         anthropic_api_key=_str("ANTHROPIC_API_KEY"),
         ai_model=_str("AI_MODEL", "claude-sonnet-5"),
