@@ -65,6 +65,9 @@ ODDS_URL = "https://api.the-odds-api.com/v4/sports/{key}/odds/"
 STATE_FILE = BASE_DIR / "hlidac_stav.json"
 CASES_FILE = BASE_DIR / "hlidac_pripady.csv"
 LOG_FILE = BASE_DIR / "hlidac.log"
+ESPN_ODDS_URL = ("https://sports.core.api.espn.com/v2/sports/soccer/leagues/{league}"
+                 "/events/{event}/competitions/{event}/odds")
+SNAPSHOT_DIR = BASE_DIR / "hlidac_espn_kurzy"   # mereni: dava ESPN kurzy i behem zapasu?
 LOCK_PORT = 47613          # jedna instance: obsazeny port = hlidac uz bezi
 
 # Liga ESPN -> soutez The Odds API (pro zivy kurz). Bez mapovani se pripad
@@ -238,6 +241,38 @@ class Espn:
             raise HlidacError(f"ESPN {league}: HTTP {resp.status_code}")
         events = (resp.json() or {}).get("events") or []
         return [e for e in (parse_event(ev, league) for ev in events) if e]
+
+    def odds_snapshot(self, league: str, event_id: str) -> list[dict[str, Any]]:
+        """Vsechny nabidky kurzu, ktere ESPN k zapasu prave ma (DraftKings, Bet365...)."""
+        resp = self._http.get(ESPN_ODDS_URL.format(league=league, event=event_id),
+                              timeout=self.cfg.http_timeout)
+        if resp.status_code != 200:
+            return []
+        out = []
+        for item in (resp.json() or {}).get("items") or []:
+            if "$ref" in item:
+                sub = self._http.get(item["$ref"], timeout=self.cfg.http_timeout)
+                item = sub.json() if sub.status_code == 200 else {}
+            out.append(item)
+        return out
+
+
+def save_snapshot(espn: Espn, cand: dict[str, Any], mid: str, minute: int, tag: str) -> None:
+    """
+    Mereni zdarma: ulozi, co ESPN o kurzech vraci behem zapasu. Az bude jasne,
+    jestli se kurzy po golu meni, muze ESPN nahradit The Odds API uplne.
+    """
+    try:
+        data = espn.odds_snapshot(cand["league"], mid)
+    except (requests.RequestException, ValueError) as exc:
+        log.warning("Snimek kurzu ESPN %s: %s", mid, exc)
+        return
+    SNAPSHOT_DIR.mkdir(exist_ok=True)
+    path = SNAPSHOT_DIR / f"{mid}_{tag}_{minute:02d}min.json"
+    path.write_text(json.dumps({"zapas": f"{cand['home']} - {cand['away']}", "minuta": minute,
+                                "cas": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                                "nabidky": data}, ensure_ascii=False, indent=1), encoding="utf-8")
+    log.info("Snimek kurzu ESPN ulozen: %s (%s nabidek)", path.name, len(data))
 
 
 # --------------------------------------------------------------------------- #
@@ -596,9 +631,15 @@ def run(cfg: Config) -> int:
                     for mid, cand in active.items():
                         if cand["league"] != league or mid not in matches:
                             continue
-                        verdict, info = check_trigger(matches[mid], cand, cfg.hlidac_goal_minute,
+                        match = matches[mid]
+                        if match["state"] == "in" and match["minute"] >= 5 and not cand.get("snimek"):
+                            save_snapshot(espn, cand, mid, match["minute"], "prubeh")
+                            cand["snimek"] = True
+                        verdict, info = check_trigger(match, cand, cfg.hlidac_goal_minute,
                                                       cfg.hlidac_goal_minute + 3)
                         if verdict == "trigger":
+                            if cand["stav"] == "ceka":
+                                save_snapshot(espn, cand, mid, match["minute"], "gol")
                             cand["stav"] = "kurz"
                             if record_case(odds_api, cfg, state, mid, cand, info,
                                            matches[mid]["minute"], notifier):
