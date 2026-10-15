@@ -4,6 +4,11 @@ Python agent, který jednou denně projde nabídku tenisu, basketbalu a házené
 spočítá **skutečnou šanci favorita na výhru**, rozdělí zápasy do tří
 kurzových pásem a z každého pošle na Telegram tři nejjistější zápasy dne i noci.
 
+> **Stav od 15. 10. 2026:** denní rozesílání tipů je **vypnuté** (workflow
+> *Denni tipy* na GitHubu je zakázaný). Běží jen **hlídač živých kurzů**
+> na počítači — viz kapitola [Hlídač živých kurzů](#hlídač-živých-kurzů-hlidacpy).
+> Denní agent se zapne zpět v *Actions → Denni tipy → Enable workflow*.
+
 Agent **neřeší peníze** — žádný bankroll, žádná výše vkladu, žádná kampaň.
 Jen tipy; kolik a jestli vůbec vsadíš, je na tobě.
 
@@ -385,7 +390,8 @@ main.py         denní běh: výsledky → nabídka → tipy → Telegram
 └── state.py    deník tipů a statistiky pásem
 
 hlidac.py       hlídač živých kurzů (běží na tvém počítači, viz kapitola níže)
-hlidac_pripady.csv  zapsané případy hlídače (data, commituj ručně)
+hlidac_pripady.csv  zapsané případy hlídače
+hlidac.log          výpis hlídače (není v repozitáři)
 
 settings.env        běžné nastavení (v repozitáři, upravitelné na GitHubu)
 .env                tajné klíče jen pro lokální běh (NIKDY na GitHub)
@@ -559,49 +565,59 @@ není. **Právě to zbývá ověřit** — proto hlídač v prvních týdnech je
 Důležité: férové kurzy pocházejí z dat bez kurzů (síla favorita odhadnutá
 z Elo), takže jsou to hypotézy. Zapsané případy je buď potvrdí, nebo vyvrátí.
 
+### Odkud bere data (zdarma, bez registrace)
+
+| Co | Zdroj | Cena |
+|---|---|---|
+| Program, favorit a předzápasový kurz | ESPN (neoficiální veřejné API, kurzy DraftKings) | zdarma, bez klíče |
+| Živé skóre a minuta gólu | ESPN | zdarma, bez klíče |
+| Živý kurz po gólu (medián evropských kanceláří) | The Odds API (`ODDS_API_KEY`) | 1 kredit, jen při spuštění pravidla |
+| Konečný výsledek | ESPN | zdarma |
+
+Pravidlo se spouští zhruba 2–4× za víkend, takže hlídač spotřebuje asi
+10–20 kreditů The Odds API měsíčně (strop `HLIDAC_MAX_ODDS_CALLS` denně).
+Sleduje 19 soutěží: anglickou 1. a 2. ligu, Španělsko, Německo, Itálii,
+Francii, Nizozemsko, Portugalsko, Belgii, Turecko, Skotsko, Rakousko,
+Švýcarsko, Řecko, Norsko, Dánsko a tři evropské poháry. **Česká liga v ESPN
+není.** Dvojtip se z živé nabídky nestahuje zvlášť (stál by kredit navíc),
+hlídač ho odhaduje z kurzu na výhru a remízu.
+
+Rizika: ESPN API je neoficiální a může se bez varování změnit (`python hlidac.py
+diag` to odhalí). API-Football by bylo oficiální, ale bezplatný tarif má jen
+100 dotazů denně a podle všeho jen starší sezóny, takže by vyšlo na Pro za
+19 USD měsíčně.
+
 ### Co hlídač dělá
 
-1. Ráno (`HLIDAC_PREP_HOUR`) stáhne program sledovaných lig a pošle na Telegram
-   seznam dnešních favoritů do 1,5.
-2. Od výkopu do `HLIDAC_WINDOW_MINUTES` (22. minuty) hlídá skóre každých
-   `HLIDAC_INTERVAL_SECONDS`.
+1. Ráno (`HLIDAC_PREP_HOUR`) stáhne program sledovaných soutěží a pošle na
+   Telegram seznam dnešních favoritů do 1,5.
+2. Od výkopu do `HLIDAC_WINDOW_MINUTES` (22. minuty) kontroluje skóre každých
+   `HLIDAC_INTERVAL_SECONDS` (60 s).
 3. Když padne 0:1 proti favoritovi do 15. minuty, stáhne živé kurzy, porovná je
-   s férovou hranicí a pošle zprávu **VALUE** / **bez value** s kurzem na výhru
-   i dvojtip. Případ zapíše do `hlidac_pripady.csv`.
+   s férovou hranicí a pošle zprávu **VALUE** / **bez value**. Případ zapíše do
+   `hlidac_pripady.csv`.
 4. Po zápase dopíše výsledek. `python hlidac.py report` spočítá, jak často byl
    kurz nad hranicí a jaký by byl zisk.
 
-**Hlídač nic nesází.** Kurzy bere od mezinárodních kanceláří (Bet365 apod.);
-když přijde VALUE, rozhoduje, co v tu chvíli nabízí Tipsport nebo Fortuna.
+**Hlídač nic nesází.** Když přijde VALUE, rozhoduje, co v tu chvíli nabízí
+Tipsport nebo Fortuna.
 
-### Proč běží na počítači, ne na GitHubu
+### Spouštění na počítači
 
-Musí se ptát na skóre každé 3 minuty po celou dobu zápasů. GitHub Actions
-umí spouštět nejdřív po 5 minutách, časy nedodržuje (viděli jsme zpoždění
-v hodinách) a bezplatných 2000 minut měsíčně by víkendový provoz spotřeboval
-za dva týdny. Na počítači to stojí jen otevřené okno.
+Hlídač se spouští sám přes Plánovač úloh Windows (úloha **Hlidac zivych
+kurzu**): při přihlášení a každý den v 7:55, běží skrytě a druhou instanci
+nespustí. Výpis je v `hlidac.log`. Počítač musí být zapnutý a nesmí usnout
+(*Nastavení → Napájení → Režim spánku: Nikdy*).
 
-### Zprovoznění (15 minut)
+| Příkaz | Co dělá |
+|---|---|
+| `python hlidac.py plan 2026-10-17` | favorité daného dne (zdarma, nic neposílá) |
+| `python hlidac.py diag` | kontrola soutěží, kreditů a Telegramu |
+| `python hlidac.py run` | hlídání ručně v okně (Ctrl+C ukončí) |
+| `python hlidac.py report` | vyhodnocení zapsaných případů |
 
-1. Klíč k API-Football: <https://dashboard.api-football.com/register>, v
-   dashboardu zkopíruj **API Key** a dej ho do `.env` jako `API_FOOTBALL_KEY`.
-   Telegram je stejný jako u denního agenta (už v `.env`).
-2. Kontrola: `python hlidac.py selftest` (bez internetu) a
-   `python hlidac.py diag` (ověří klíč, ID lig a pošle testovací zprávu).
-   Když u ligy vidíš `NENALEZENO`, oprav ID v `HLIDAC_LEAGUES`.
-3. Spuštění: `python hlidac.py run` a nechat okno otevřené (o víkendu od 8:00
-   do večera). Počítač nesmí usnout: *Nastavení → Napájení → Režim spánku:
-   Nikdy*.
-4. Vyhodnocení: `python hlidac.py report`, nebo mi pošli `hlidac_pripady.csv`.
-
-### Bezplatný tarif a tarif Pro
-
-Bezplatný tarif API-Football má 100 dotazů denně, proto hlídač sleduje 4 ligy
-(Premier League, La Liga, Bundesliga, česká liga) a kontroluje každé 3 minuty.
-Na ověření, že vše funguje, to stačí. Na plný provoz (16 lig, kontrola každých
-45 s) je tarif Pro za 19 USD měsíčně; pak v `settings.env` nastav
-`HLIDAC_INTERVAL_SECONDS=45`, `HLIDAC_MAX_REQUESTS_PER_DAY=7400` a
-`HLIDAC_LEAGUES` na všech 16 ID (seznam je v komentáři u nastavení).
+Vypnutí: *Plánovač úloh → Hlidac zivych kurzu → Zakázat*, nebo v PowerShellu
+`Disable-ScheduledTask "Hlidac zivych kurzu"`.
 
 Takových zápasů je v Evropě zhruba 2–4 za víkend, takže za měsíc nebo dva bude
 jasné, jestli kanceláře nad férovou hranici chodí.
@@ -636,11 +652,11 @@ v `settings.env`.
 | `MIN_MINUTES_BEFORE_START` | `0` | odstup před začátkem zápasu; `0` = tipy chodí, dokud zápas nezačal |
 | `MAX_HOURS_AHEAD` | `24` | den i následující noc |
 | `TRACK_RESULTS` | `true` | hlásit, jak dopadly minulé tipy |
-| `HLIDAC_LEAGUES` | `39,140,78,345` | ID lig API-Football, které hlídač sleduje |
+| `HLIDAC_LEAGUES` | 19 soutěží | kódy soutěží ESPN, které hlídač sleduje |
 | `HLIDAC_MAX_ODDS` | `1.5` | hlídají se jen favorité s kurzem do této hodnoty |
 | `HLIDAC_GOAL_MINUTE` | `15` | gól soupeře musí padnout do této minuty |
-| `HLIDAC_INTERVAL_SECONDS` | `180` | jak často se kontroluje skóre (Pro: 45) |
-| `HLIDAC_MAX_REQUESTS_PER_DAY` | `95` | denní strop dotazů (Pro: 7400) |
+| `HLIDAC_INTERVAL_SECONDS` | `60` | jak často se kontroluje skóre (ESPN je zdarma) |
+| `HLIDAC_MAX_ODDS_CALLS` | `10` | denní strop dotazů na živé kurzy (1 kredit = 1 dotaz) |
 | `HLIDAC_VALUE_MARGIN` | `1.05` | VALUE = živý kurz aspoň o 5 % nad férovým |
 | `ENABLE_SOCCER` | `true` | zapne fotbalovou větev (trhy po zápasech) |
 | `SOCCER_WEEKDAYS` | (prázdné) | dny, kdy se fotbal tahá (1 = pondělí); prázdné = každý den |

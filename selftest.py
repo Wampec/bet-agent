@@ -1746,98 +1746,135 @@ def test_hlidac() -> None:
     import tempfile
     import hlidac
 
-    cand = dict(fav="home", home_id=1, away_id=2)
+    def espn_event(state="in", name="STATUS_FIRST_HALF", clock=600.0, hs=0, as_=1,
+                   goals=((2, 480.0),), ml=("-250", "+350", "+600")):
+        details = [{"scoringPlay": True, "clock": {"value": sec}, "team": {"id": str(team)}}
+                   for team, sec in goals]
+        odds = [{"moneyline": {"home": {"close": {"odds": ml[0]}}, "draw": {"close": {"odds": ml[1]}},
+                               "away": {"close": {"odds": ml[2]}}}}] if ml else []
+        return {"id": "777", "date": "2026-10-17T14:00Z",
+                "status": {"clock": clock, "type": {"state": state, "name": name}},
+                "competitions": [{"competitors": [
+                    {"homeAway": "home", "score": str(hs), "team": {"id": "1", "displayName": "Manchester City"}},
+                    {"homeAway": "away", "score": str(as_), "team": {"id": "2", "displayName": "Ipswich Town"}}],
+                    "details": details, "odds": odds}]}
 
-    def fx(short, elapsed, gh, ga, events=()):
-        return {"fixture": {"status": {"short": short, "elapsed": elapsed}},
-                "goals": {"home": gh, "away": ga}, "events": list(events)}
+    check("americky kurz -> desetinny",
+          hlidac.american_to_decimal("-250") == 1.4 and hlidac.american_to_decimal("+215") == 3.15
+          and hlidac.american_to_decimal("abc") is None)
+    m = hlidac.parse_event(espn_event(), "eng.1")
+    check("ESPN zapas se precte",
+          m["home"] == "Manchester City" and m["home_score"] == 0 and m["away_score"] == 1
+          and m["minute"] == 11 and m["goals"] == [{"team_id": "2", "minute": 9}], f"({m})")
+    check("predzapasovy kurz z DraftKings", m["odds_home"] == 1.4 and m["odds_away"] == 7.0)
+    check("favorit do 1,5 se najde", hlidac.favourite(m, 1.5) == ("home", 1.4))
+    check("favorit nad hranici se nebere", hlidac.favourite(m, 1.3) is None)
+    no_odds = hlidac.parse_event(espn_event(ml=None), "eng.1")
+    check("zapas bez kurzu nema favorita", hlidac.favourite(no_odds, 1.5) is None)
 
-    def goal(team, minute, detail="Normal Goal"):
-        return {"type": "Goal", "team": {"id": team}, "time": {"elapsed": minute}, "detail": detail}
+    cand = {"fav": "home"}
 
-    check("pred vykopem se ceka", hlidac.check_trigger(fx("NS", None, 0, 0), cand)[0] == "cekej")
-    check("0:1 z 8. minuty spusti pravidlo",
-          hlidac.check_trigger(fx("1H", 9, 0, 1, [goal(2, 8)]), cand) == ("trigger", 8))
-    check("gol v 16. minute uz je pozde",
-          hlidac.check_trigger(fx("1H", 17, 0, 1, [goal(2, 16)]), cand)[0] == "pryc")
-    check("vedeni favorita = nic", hlidac.check_trigger(fx("1H", 12, 1, 0, [goal(1, 5)]), cand)[0] == "pryc")
-    check("0:0 po 18. minute = nic", hlidac.check_trigger(fx("1H", 19, 0, 0), cand)[0] == "pryc")
-    check("0:0 v 10. minute se ceka", hlidac.check_trigger(fx("1H", 10, 0, 0), cand)[0] == "cekej")
-    check("neuznana penalta neni gol",
-          hlidac.check_trigger(fx("1H", 9, 0, 1, [goal(2, 3, "Missed Penalty"), goal(2, 8)]), cand)
-          == ("trigger", 8))
-    check("favorit venku: gol domacich ve 13. minute",
-          hlidac.check_trigger(fx("1H", 14, 1, 0, [goal(1, 13)]), dict(fav="away", home_id=1, away_id=2))
-          == ("trigger", 13))
-    check("bez udalosti se bere aktualni minuta",
-          hlidac.check_trigger(fx("1H", 11, 0, 1), cand) == ("trigger", 11))
-    check("zruseny zapas = pryc", hlidac.check_trigger(fx("PST", 0, 0, 0), cand)[0] == "pryc")
+    def trig(**kw):
+        return hlidac.check_trigger(hlidac.parse_event(espn_event(**kw), "eng.1"), cand)
 
-    item = {"odds": [
-        {"name": "Fulltime Result", "values": [
-            {"value": "Home", "odd": "2.20"}, {"value": "Draw", "odd": "3.6"}, {"value": "Away", "odd": "3.4"}]},
-        {"name": "Asian Handicap", "values": [{"value": "Home", "odd": "1.5", "handicap": "-1"}]},
-        {"name": "Double Chance", "values": [
-            {"value": "Home/Draw", "odd": "1.36"}, {"value": "Draw/Away", "odd": "1.7", "suspended": True}]}]}
-    check("zive kurzy domaciho favorita",
-          hlidac.live_odds(item, "home") == {"win": 2.2, "draw": 3.6, "opp": 3.4, "dc": 1.36})
-    away = hlidac.live_odds(item, "away")
-    check("favorit venku: pozastaveny dvojtip se nebere",
-          away["win"] == 3.4 and away["opp"] == 2.2 and away["dc"] is None)
+    check("0:1 z 9. minuty spusti pravidlo", trig() == ("trigger", 9))
+    check("pred vykopem se ceka", trig(state="pre", clock=0, as_=0, goals=())[0] == "cekej")
+    check("gol v 17. minute uz je pozde", trig(clock=1000, goals=((2, 960.0),))[0] == "pryc")
+    check("vedeni favorita = nic", trig(hs=1, as_=0, goals=((1, 300.0),))[0] == "pryc")
+    check("0:0 po 18. minute = nic", trig(clock=1140, as_=0, goals=())[0] == "pryc")
+    check("0:0 v 10. minute se ceka", trig(clock=540, as_=0, goals=())[0] == "cekej")
+    check("bez udalosti se bere aktualni minuta", trig(clock=650, goals=()) == ("trigger", 11))
+    check("odlozeny zapas = pryc", trig(name="STATUS_POSTPONED")[0] == "pryc")
+    check("favorit venku: gol domacich", hlidac.check_trigger(
+        hlidac.parse_event(espn_event(hs=1, as_=0, goals=((1, 700.0),)), "eng.1"),
+        {"fav": "away"}) == ("trigger", 12))
 
-    pre = {"bookmakers": [
-        {"name": "Unibet", "bets": [{"name": "Match Winner", "values": [
-            {"value": "Home", "odd": "1.50"}, {"value": "Draw", "odd": "4.2"}, {"value": "Away", "odd": "6.5"}]}]},
-        {"name": "Bet365", "bets": [{"name": "Match Winner", "values": [
-            {"value": "Home", "odd": "1.45"}, {"value": "Draw", "odd": "4.5"}, {"value": "Away", "odd": "7"}]}]}]}
-    check("predzapasovy kurz z preferovane kancelare",
-          hlidac.prematch_1x2(pre, ["Bet365"]) == (1.45, 4.5, 7.0))
-    avg = hlidac.prematch_1x2(pre, ["Pinnacle"])
-    check("bez preferovane kancelare prumer", avg is not None and abs(avg[0] - 1.475) < 1e-9)
-    check("bez kurzu None", hlidac.prematch_1x2({"bookmakers": []}, ["Bet365"]) is None)
+    check("nazvy tymu se srovnaji",
+          hlidac.team_similarity("Bayern Munich", "FC Bayern München") >= 0.8
+          and hlidac.team_similarity("Manchester City", "Manchester United") < 0.95
+          and hlidac.team_similarity("AS Roma", "Roma") == 1.0)
+    cand_full = {"kickoff": "2026-10-17T14:00Z", "home": "Manchester City", "away": "Ipswich Town",
+                 "fav": "home", "league": "eng.1", "pre": 1.4, "pokusy_kurz": 0}
+    odds_events = [
+        {"commence_time": "2026-10-17T14:00:00Z", "home_team": "Manchester United", "away_team": "Burnley"},
+        {"commence_time": "2026-10-17T14:00:00Z", "home_team": "Manchester City", "away_team": "Ipswich",
+         "bookmakers": [
+             {"markets": [{"key": "h2h", "outcomes": [
+                 {"name": "Manchester City", "price": 2.10}, {"name": "Draw", "price": 3.6},
+                 {"name": "Ipswich", "price": 3.4}]}]},
+             {"markets": [{"key": "h2h", "outcomes": [
+                 {"name": "Manchester City", "price": 2.30}, {"name": "Draw", "price": 3.5},
+                 {"name": "Ipswich", "price": 3.3}]}]}]},
+        {"commence_time": "2026-10-18T14:00:00Z", "home_team": "Manchester City", "away_team": "Ipswich"},
+    ]
+    found = hlidac.match_odds_event(odds_events, cand_full)
+    check("spravny zapas v nabidce The Odds API", found is odds_events[1])
+    check("cizi zapas se nenajde", hlidac.match_odds_event(odds_events[:1], cand_full) is None)
+    prices = hlidac.live_prices(found, "Manchester City", "Ipswich Town")
+    check("zivy kurz: median, nejlepsi a odhad dvojtipu",
+          prices["win"] == 2.2 and prices["win_max"] == 2.3 and prices["books"] == 2
+          and prices["dc"] is not None and 1.3 < prices["dc"] < 1.45, f"({prices})")
 
     check("ferove kurzy podle sily favorita",
           hlidac.fair_for(1.30) == (1.61, 1.23) and hlidac.fair_for(1.45) == (2.05, 1.41)
           and hlidac.fair_for(1.60) == (None, None))
 
-    # zapis pripadu, dopsani vysledku a report -- v docasne slozce
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "pripady.csv"
-        row = {c: "" for c in hlidac.CSV_COLUMNS}
-        row.update(datum="2026-10-18", liga="Anglie - Premier League", domaci="Arsenal", hoste="Luton",
-                   fixture_id="123", favorit="Arsenal", kurz_pred=1.25, minuta_golu=7, minuta_zaznamu=9,
-                   live_vyhra=1.95, live_dvojtip=1.30, ferovy_vyhra=1.61, ferovy_dvojtip=1.23,
-                   value_vyhra=1, value_dvojtip=1)
-        hlidac.append_case(row, path)
-        hlidac.append_case({**row, "fixture_id": "124", "live_vyhra": 1.50, "value_vyhra": 0}, path)
-        rows = hlidac.read_cases(path)
-        check("pripady se zapisou do CSV", len(rows) == 2 and rows[0]["favorit"] == "Arsenal")
-        rows[0].update(konec="2:1", favorit_vyhral="1", favorit_neprohral="1")
-        rows[1].update(konec="0:1", favorit_vyhral="0", favorit_neprohral="0")
-        hlidac.write_cases(rows, path)
-        text = hlidac.report(hlidac.read_cases(path))
-        check("report spocita ROI", "2 sazek" in text and "jen VALUE: 1 sazek" in text, f"({text})")
+    class FakeOddsApi:
+        def __init__(self, events):
+            self.events, self.calls = events, 0
 
-    class FakeHttp:
-        def __init__(self):
-            self.calls = 0
-
-        def get(self, url, params=None, headers=None, timeout=None):
+        def live_events(self, key):
             self.calls += 1
-            return SimpleNamespace(status_code=200, headers={"x-ratelimit-requests-remaining": "90"},
-                                   text="", json=lambda: {"response": [], "paging": {"current": 1, "total": 1}})
+            return self.events
 
-    cfg = make_cfg(hlidac_max_requests_per_day=10)
-    state: dict = {}
-    api = hlidac.ApiFootball(cfg, state, http=FakeHttp())
-    for _ in range(10):
-        api.get("status")
+    cfg = make_cfg()
+    with tempfile.TemporaryDirectory() as tmp:
+        cases = Path(tmp) / "pripady.csv"
+        old_cases = hlidac.CASES_FILE
+        hlidac.CASES_FILE = cases
+        hlidac.append_case.__defaults__ = (cases,)
+        hlidac.read_cases.__defaults__ = (cases,)
+        hlidac.write_cases.__defaults__ = (cases,)
+        try:
+            state: dict = {}
+            sent: list[str] = []
+            notifier = SimpleNamespace(send=lambda text, parse_mode="": sent.append(text))
+            ok = hlidac.record_case(FakeOddsApi(odds_events), cfg, state, "777", dict(cand_full), 9, 11, notifier)
+            rows = hlidac.read_cases(cases)
+            check("pripad se zapise se zivym kurzem",
+                  ok and len(rows) == 1 and rows[0]["live_vyhra"] == "2.2" and rows[0]["kancelari"] == "2",
+                  f"({rows})")
+            check("2,20 nad hranici 1,69 = VALUE",
+                  rows and rows[0]["value_vyhra"] == "1" and sent and sent[0].startswith("VALUE"))
+            check("zapas ceka na vysledek", "777" in state.get("k_dohrani", {}))
+            retry = dict(cand_full)
+            check("kdyz kurz jeste neni, zkusi se znovu",
+                  hlidac.record_case(FakeOddsApi([]), cfg, {}, "778", retry, 9, 11, notifier) is False
+                  and retry["pokusy_kurz"] == 1)
+            rows[0].update(konec="2:1", favorit_vyhral="1", favorit_neprohral="1")
+            hlidac.write_cases(rows, cases)
+            text = hlidac.report(hlidac.read_cases(cases))
+            check("report spocita ROI", "1 sazek" in text and "+1.20" in text, f"({text})")
+        finally:
+            hlidac.CASES_FILE = old_cases
+            hlidac.append_case.__defaults__ = (old_cases,)
+            hlidac.read_cases.__defaults__ = (old_cases,)
+            hlidac.write_cases.__defaults__ = (old_cases,)
+
+    state = {}
+    budget_cfg = make_cfg(hlidac_max_odds_calls=1, odds_api_key="k")
+    http = SimpleNamespace(get=lambda *a, **k: SimpleNamespace(status_code=200, headers={}, text="",
+                                                               json=lambda: []))
+    api = hlidac.OddsApi(budget_cfg, state, http=http)
+    api.live_events("soccer_epl")
     try:
-        api.get("status")
-        check("denni limit dotazu se hlida", False)
-    except hlidac.HlidacError as exc:
-        check("denni limit dotazu se hlida", "limit" in str(exc) and state["req_pocet"] == 10)
-    check("klic jde v hlavicce (ne v URL)", True)
+        api.live_events("soccer_epl")
+        check("denni strop dotazu na zive kurzy", False)
+    except hlidac.HlidacError:
+        check("denni strop dotazu na zive kurzy", state["odds_pocet"] == 1)
+
+    check("vsechny vychozi ligy maji zivy kurz",
+          all(lg in hlidac.ESPN_TO_ODDS for lg in make_cfg().hlidac_leagues))
 
     def fails(**kwargs) -> str:
         try:

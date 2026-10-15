@@ -182,17 +182,17 @@ class Config:
     # --- Hlidac zivych kurzu (hlidac.py) --------------------------------- #
     # Samostatny program: favorit (kurz do HLIDAC_MAX_ODDS) dostane gol do
     # HLIDAC_GOAL_MINUTE a prohrava 0:1 -> zaznamenat zivy kurz a poslat
-    # upozorneni. Data z API-Football (klic API_FOOTBALL_KEY v .env).
-    api_football_key: str = ""
-    hlidac_leagues: list[int] = field(default_factory=lambda: [39, 140, 78, 345])
+    # upozorneni. Skore z ESPN (zdarma), zivy kurz z The Odds API.
+    hlidac_leagues: list[str] = field(default_factory=lambda: [
+        "eng.1", "esp.1", "ger.1", "ita.1", "fra.1", "ned.1", "por.1", "bel.1",
+        "tur.1", "sco.1", "aut.1", "sui.1", "gre.1", "nor.1", "den.1", "eng.2",
+        "uefa.champions", "uefa.europa", "uefa.europa.conf"])
     hlidac_max_odds: float = 1.5
     hlidac_goal_minute: int = 15
     hlidac_window_minutes: int = 22
-    hlidac_interval_seconds: int = 180
-    hlidac_max_requests_per_day: int = 95
+    hlidac_interval_seconds: int = 60
+    hlidac_max_odds_calls: int = 10     # dotazu na zive kurzy denne (1 kredit = 1 dotaz)
     hlidac_prep_hour: int = 8
-    hlidac_bookmakers: list[str] = field(
-        default_factory=lambda: ["Bet365", "Pinnacle", "1xBet"])
     hlidac_value_margin: float = 1.05
 
     # Kolik souteci se maximalne dotazuje. Souteze bez zapasu jsou zdarma,
@@ -375,8 +375,8 @@ class Config:
             problems.append("HLIDAC_MAX_ODDS musi byt > 1")
         if self.hlidac_interval_seconds < 30:
             problems.append("HLIDAC_INTERVAL_SECONDS musi byt >= 30")
-        if self.hlidac_max_requests_per_day < 10:
-            problems.append("HLIDAC_MAX_REQUESTS_PER_DAY musi byt >= 10")
+        if self.hlidac_max_odds_calls < 0:
+            problems.append("HLIDAC_MAX_ODDS_CALLS nesmi byt zaporne")
         if not 0 <= self.hlidac_prep_hour <= 23:
             problems.append("HLIDAC_PREP_HOUR musi byt 0-23")
         if self.hlidac_value_margin < 1.0:
@@ -545,15 +545,15 @@ def load_config() -> Config:
     enable_soccer = _bool("ENABLE_SOCCER", False)
     return Config(
         odds_api_key=_str("ODDS_API_KEY"),
-        api_football_key=_str("API_FOOTBALL_KEY"),
-        hlidac_leagues=_int_list("HLIDAC_LEAGUES", "39,140,78,345"),
+        hlidac_leagues=_csv("HLIDAC_LEAGUES", "eng.1,esp.1,ger.1,ita.1,fra.1,ned.1,por.1,"
+                            "bel.1,tur.1,sco.1,aut.1,sui.1,gre.1,nor.1,den.1,eng.2,"
+                            "uefa.champions,uefa.europa,uefa.europa.conf"),
         hlidac_max_odds=_float("HLIDAC_MAX_ODDS", 1.5),
         hlidac_goal_minute=_int("HLIDAC_GOAL_MINUTE", 15),
         hlidac_window_minutes=_int("HLIDAC_WINDOW_MINUTES", 22),
-        hlidac_interval_seconds=_int("HLIDAC_INTERVAL_SECONDS", 180),
-        hlidac_max_requests_per_day=_int("HLIDAC_MAX_REQUESTS_PER_DAY", 95),
+        hlidac_interval_seconds=_int("HLIDAC_INTERVAL_SECONDS", 60),
+        hlidac_max_odds_calls=_int("HLIDAC_MAX_ODDS_CALLS", 10),
         hlidac_prep_hour=_int("HLIDAC_PREP_HOUR", 8),
-        hlidac_bookmakers=_csv("HLIDAC_BOOKMAKERS", "Bet365,Pinnacle,1xBet"),
         hlidac_value_margin=_float("HLIDAC_VALUE_MARGIN", 1.05),
         telegram_bot_token=_str("TELEGRAM_BOT_TOKEN"),
         telegram_chat_id=_str("TELEGRAM_CHAT_ID"),

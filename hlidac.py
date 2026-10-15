@@ -1,5 +1,5 @@
 """
-hlidac.py -- hlidac zivych kurzu. Bezi na tvem pocitaci, ne na GitHubu.
+hlidac.py -- hlidac zivych kurzu. Bezi na tvem pocitaci.
 
 Pravidlo
 --------
@@ -16,29 +16,40 @@ Hlidac NIC NESAZI. Jen:
   - posle na Telegram zpravu (VALUE / bez value) a zapise pripad do CSV,
   - po zapase dopise vysledek.
 
-Smysl prvnich tydnu je OVERIT, jestli kancelare takovy kurz opravdu nabizeji.
+Zdroje dat (bez registrace):
+  - ESPN (neoficialni verejne API, zdarma, bez klice): program, predzapasovy
+    kurz (DraftKings), zive skore a minuta golu, vysledek.
+  - The Odds API (klic ODDS_API_KEY, uz ho mame): zivy kurz evropskych
+    kancelari, jen pri spusteni pravidla -- 1 kredit za dotaz.
+
 Ferove kurzy jsou odhad z historickych dat bez kurzu (sila favorita z Elo),
 takze je ber jako hypotezu, kterou zapsane pripady potvrdi nebo vyvrati.
 
 Prikazy:
-    python hlidac.py diag      kontrola klice, lig a Telegramu (~3 dotazy)
-    python hlidac.py run       hlidani (nechat bezet, Ctrl+C ukonci)
-    python hlidac.py report    vyhodnoceni zapsanych pripadu
-    python hlidac.py selftest  test logiky bez internetu (soucast selftest.py)
+    python hlidac.py plan [RRRR-MM-DD]  favorite dne (zdarma, nic neposila)
+    python hlidac.py diag               kontrola lig, kreditu a Telegramu
+    python hlidac.py run                hlidani (nechat bezet, Ctrl+C ukonci)
+    python hlidac.py report             vyhodnoceni zapsanych pripadu
 
-Klic API_FOOTBALL_KEY patri do .env, ostatni nastaveni je v settings.env
-(HLIDAC_*). Telegram je stejny jako u denniho agenta.
+Nastaveni je v settings.env (HLIDAC_*), Telegram stejne jako u denniho agenta.
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+import difflib
 import json
 import logging
+import re
+import socket
+import statistics
 import sys
 import time
-from datetime import datetime, timedelta
+import unicodedata
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
@@ -49,9 +60,36 @@ from notifier import TelegramError, TelegramNotifier
 
 log = logging.getLogger("hlidac")
 
-API_URL = "https://v3.football.api-sports.io"
+ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/{league}/scoreboard"
+ODDS_URL = "https://api.the-odds-api.com/v4/sports/{key}/odds/"
 STATE_FILE = BASE_DIR / "hlidac_stav.json"
 CASES_FILE = BASE_DIR / "hlidac_pripady.csv"
+LOG_FILE = BASE_DIR / "hlidac.log"
+LOCK_PORT = 47613          # jedna instance: obsazeny port = hlidac uz bezi
+
+# Liga ESPN -> soutez The Odds API (pro zivy kurz). Bez mapovani se pripad
+# zapise jen s predzapasovym kurzem.
+ESPN_TO_ODDS: dict[str, str] = {
+    "eng.1": "soccer_epl",
+    "eng.2": "soccer_efl_champ",
+    "esp.1": "soccer_spain_la_liga",
+    "ger.1": "soccer_germany_bundesliga",
+    "ita.1": "soccer_italy_serie_a",
+    "fra.1": "soccer_france_ligue_one",
+    "ned.1": "soccer_netherlands_eredivisie",
+    "por.1": "soccer_portugal_primeira_liga",
+    "bel.1": "soccer_belgium_first_div",
+    "tur.1": "soccer_turkey_super_league",
+    "sco.1": "soccer_spl",
+    "aut.1": "soccer_austria_bundesliga",
+    "sui.1": "soccer_switzerland_superleague",
+    "gre.1": "soccer_greece_super_league",
+    "nor.1": "soccer_norway_eliteserien",
+    "den.1": "soccer_denmark_superliga",
+    "uefa.champions": "soccer_uefa_champs_league",
+    "uefa.europa": "soccer_uefa_europa_league",
+    "uefa.europa.conf": "soccer_uefa_europa_conference_league",
+}
 
 # Ferove kurzy z historickych dat: (max predzapasovy kurz favorita,
 # ferovy kurz na vyhru, ferovy kurz na dvojtip "favorit neprohraje").
@@ -60,19 +98,17 @@ CASES_FILE = BASE_DIR / "hlidac_pripady.csv"
 FAIR_ODDS: tuple[tuple[float, float, float], ...] = ((1.40, 1.61, 1.23), (1.50, 2.05, 1.41))
 
 CSV_COLUMNS = [
-    "datum", "liga", "domaci", "hoste", "fixture_id", "favorit", "kurz_pred",
-    "minuta_golu", "minuta_zaznamu", "live_vyhra", "live_remiza", "live_soupere",
-    "live_dvojtip", "ferovy_vyhra", "ferovy_dvojtip", "value_vyhra", "value_dvojtip",
-    "konec", "favorit_vyhral", "favorit_neprohral",
+    "datum", "liga", "domaci", "hoste", "zapas_id", "favorit", "kurz_pred",
+    "minuta_golu", "minuta_zaznamu", "live_vyhra", "live_vyhra_max", "live_remiza",
+    "live_soupere", "live_dvojtip", "kancelari", "ferovy_vyhra", "ferovy_dvojtip",
+    "value_vyhra", "value_dvojtip", "konec", "favorit_vyhral", "favorit_neprohral",
 ]
-FINISHED = {"FT", "AET", "PEN"}
-NOT_STARTED = {"NS", "TBD"}
-DEAD = {"PST", "CANC", "ABD", "AWD", "WO"}
-WIN_MARKETS = {"fulltime result", "match winner", "1x2"}
+DEAD_STATUSES = {"STATUS_POSTPONED", "STATUS_CANCELED", "STATUS_ABANDONED",
+                 "STATUS_FORFEIT", "STATUS_SUSPENDED"}
 
 
 class HlidacError(RuntimeError):
-    """Chyba API-Football nebo vycerpany denni limit."""
+    """Chyba pri stahovani dat."""
 
 
 # --------------------------------------------------------------------------- #
@@ -112,11 +148,167 @@ def write_cases(rows: list[dict[str, str]], path: Path = CASES_FILE) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# API-Football
+# ESPN: program, skore, minuta golu, predzapasovy kurz
 # --------------------------------------------------------------------------- #
-class ApiFootball:
-    """Tenky klient s dennim limitem dotazu (bezplatny tarif: 100 denne)."""
+def american_to_decimal(raw: Any) -> float | None:
+    """'+215' -> 3.15, '-250' -> 1.40; jine hodnoty None."""
+    try:
+        value = float(str(raw).replace("+", "").strip())
+    except (TypeError, ValueError):
+        return None
+    if value >= 100:
+        return round(1 + value / 100, 3)
+    if value <= -100:
+        return round(1 + 100 / abs(value), 3)
+    return None
 
+
+def _moneyline(odds: dict[str, Any], side: str) -> float | None:
+    """Kurz z ESPN odds (DraftKings): zaviraci, jinak otviraci."""
+    line = (odds.get("moneyline") or {}).get(side) or {}
+    for phase in ("close", "open"):
+        value = american_to_decimal((line.get(phase) or {}).get("odds"))
+        if value:
+            return value
+    if side == "draw":
+        return american_to_decimal((odds.get("drawOdds") or {}).get("moneyLine"))
+    return None
+
+
+def parse_event(event: dict[str, Any], league: str) -> dict[str, Any] | None:
+    """Zjednoduseny zapas z ESPN scoreboardu."""
+    try:
+        comp = event["competitions"][0]
+        sides = {c["homeAway"]: c for c in comp["competitors"]}
+        home, away = sides["home"], sides["away"]
+    except (KeyError, IndexError, TypeError):
+        return None
+    status = event.get("status") or {}
+    stype = status.get("type") or {}
+    odds_list = comp.get("odds") or []
+    odds = odds_list[0] if odds_list and odds_list[0] else {}
+    goals = []
+    for detail in comp.get("details") or []:
+        if not detail.get("scoringPlay"):
+            continue
+        seconds = (detail.get("clock") or {}).get("value")
+        minute = int(seconds // 60) + 1 if isinstance(seconds, (int, float)) else None
+        goals.append({"team_id": str((detail.get("team") or {}).get("id", "")), "minute": minute})
+    clock = status.get("clock")
+    return {
+        "id": str(event.get("id")),
+        "league": league,
+        "kickoff": event.get("date"),
+        "state": stype.get("state"),            # pre | in | post
+        "status": stype.get("name", ""),
+        "minute": int(clock // 60) + 1 if isinstance(clock, (int, float)) and stype.get("state") == "in" else 0,
+        "home": home["team"].get("displayName", ""), "away": away["team"].get("displayName", ""),
+        "home_id": str(home["team"].get("id", "")), "away_id": str(away["team"].get("id", "")),
+        "home_score": _int(home.get("score")), "away_score": _int(away.get("score")),
+        "odds_home": _moneyline(odds, "home"), "odds_draw": _moneyline(odds, "draw"),
+        "odds_away": _moneyline(odds, "away"),
+        "goals": goals,
+    }
+
+
+def _int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _kickoff(c: dict[str, Any]) -> datetime:
+    return datetime.fromisoformat(c["kickoff"].replace("Z", "+00:00"))
+
+
+class Espn:
+    def __init__(self, cfg: Config, http: Any = None) -> None:
+        self.cfg = cfg
+        self._http = http if http is not None else requests.Session()
+
+    def scoreboard(self, league: str, day: str) -> list[dict[str, Any]]:
+        """day = 'RRRRMMDD'. ESPN pocita den v americkem case, proto se bere i dalsi den."""
+        try:
+            resp = self._http.get(ESPN_URL.format(league=league), params={"dates": day},
+                                  timeout=self.cfg.http_timeout)
+        except requests.RequestException as exc:
+            raise HlidacError(f"ESPN {league}: {exc}") from exc
+        if resp.status_code != 200:
+            raise HlidacError(f"ESPN {league}: HTTP {resp.status_code}")
+        events = (resp.json() or {}).get("events") or []
+        return [e for e in (parse_event(ev, league) for ev in events) if e]
+
+
+# --------------------------------------------------------------------------- #
+# The Odds API: zivy kurz (1 kredit za dotaz)
+# --------------------------------------------------------------------------- #
+_NOISE = {"fc", "afc", "cf", "sc", "ac", "as", "ssc", "sv", "fk", "bk", "if", "cd", "ud",
+          "rc", "rcd", "club", "de", "the", "calcio", "1", "04", "05", "1899", "1846", "1909"}
+
+
+def norm_team(name: str) -> str:
+    text = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().lower()
+    words = [w for w in re.split(r"[^a-z0-9]+", text) if w and w not in _NOISE]
+    return " ".join(words)
+
+
+def team_similarity(a: str, b: str) -> float:
+    na, nb = norm_team(a), norm_team(b)
+    if not na or not nb:
+        return 0.0
+    if na in nb or nb in na:
+        return 1.0
+    return difflib.SequenceMatcher(None, na, nb).ratio()
+
+
+def match_odds_event(events: list[dict[str, Any]], cand: dict[str, Any]) -> dict[str, Any] | None:
+    """Najde v nabidce The Odds API stejny zapas (podle casu a nazvu tymu)."""
+    kickoff = _kickoff(cand)
+    best, best_score = None, 0.0
+    for ev in events:
+        try:
+            start = datetime.fromisoformat(ev["commence_time"].replace("Z", "+00:00"))
+        except (KeyError, ValueError):
+            continue
+        if abs((start - kickoff).total_seconds()) > 3 * 3600:
+            continue
+        score = (team_similarity(ev.get("home_team", ""), cand["home"])
+                 + team_similarity(ev.get("away_team", ""), cand["away"])) / 2
+        if score > best_score:
+            best, best_score = ev, score
+    return best if best_score >= 0.6 else None
+
+
+def live_prices(event: dict[str, Any], fav_name: str, opp_name: str) -> dict[str, Any]:
+    """Z h2h nabidek kancelari: median a nejlepsi kurz favorita, remiza, souper, odhad dvojtipu."""
+    fav_prices, draw_prices, opp_prices = [], [], []
+    for bm in event.get("bookmakers") or []:
+        for market in bm.get("markets") or []:
+            if market.get("key") != "h2h":
+                continue
+            outcomes = {o.get("name"): o.get("price") for o in market.get("outcomes") or []}
+            fav = next((p for n, p in outcomes.items() if n and team_similarity(n, fav_name) >= 0.8), None)
+            opp = next((p for n, p in outcomes.items() if n and team_similarity(n, opp_name) >= 0.8), None)
+            draw = outcomes.get("Draw")
+            if fav and draw and opp:
+                fav_prices.append(float(fav))
+                draw_prices.append(float(draw))
+                opp_prices.append(float(opp))
+    if not fav_prices:
+        return {"win": None, "win_max": None, "draw": None, "opp": None, "dc": None, "books": 0}
+    win = statistics.median(fav_prices)
+    draw = statistics.median(draw_prices)
+    return {
+        "win": round(win, 2), "win_max": round(max(fav_prices), 2),
+        "draw": round(draw, 2), "opp": round(statistics.median(opp_prices), 2),
+        # Dvojtip se v nabidce h2h nestahuje (stal by kredit navic): odhad z vyhry a remizy.
+        "dc": round(1 / (1 / win + 1 / draw), 2),
+        "books": len(fav_prices),
+    }
+
+
+class OddsApi:
     def __init__(self, cfg: Config, state: dict[str, Any], http: Any = None) -> None:
         self.cfg = cfg
         self.state = state
@@ -124,98 +316,42 @@ class ApiFootball:
 
     def _budget_ok(self) -> bool:
         today = datetime.now(self.cfg.tz).strftime("%Y-%m-%d")
-        if self.state.get("req_den") != today:
-            self.state["req_den"], self.state["req_pocet"] = today, 0
-        return self.state["req_pocet"] < self.cfg.hlidac_max_requests_per_day
+        if self.state.get("odds_den") != today:
+            self.state["odds_den"], self.state["odds_pocet"] = today, 0
+        return self.state["odds_pocet"] < self.cfg.hlidac_max_odds_calls
 
-    def get(self, path: str, **params: Any) -> dict[str, Any]:
+    def live_events(self, sport_key: str) -> list[dict[str, Any]]:
+        if not self.cfg.odds_api_key:
+            raise HlidacError("chybi ODDS_API_KEY")
         if not self._budget_ok():
-            raise HlidacError("denni limit dotazu vycerpan (HLIDAC_MAX_REQUESTS_PER_DAY)")
-        headers = {"x-apisports-key": self.cfg.api_football_key}
-        last_error = ""
-        for attempt in range(1, 3):
+            raise HlidacError("denni strop dotazu na zive kurzy (HLIDAC_MAX_ODDS_CALLS)")
+        try:
+            resp = self._http.get(ODDS_URL.format(key=sport_key), timeout=self.cfg.http_timeout,
+                                  params={"apiKey": self.cfg.odds_api_key, "regions": "eu",
+                                          "markets": "h2h", "oddsFormat": "decimal"})
+        except requests.RequestException as exc:
+            raise HlidacError(f"The Odds API: {type(exc).__name__}") from exc
+        self.state["odds_pocet"] = self.state.get("odds_pocet", 0) + 1
+        remaining = resp.headers.get("x-requests-remaining")
+        if remaining is not None:
+            self.state["odds_zbyva"] = remaining
+        if resp.status_code != 200:
+            raise HlidacError(f"The Odds API: HTTP {resp.status_code} {resp.text[:150]}")
+        now = datetime.now(timezone.utc)
+        out = []
+        for ev in resp.json() or []:
             try:
-                resp = self._http.get(f"{API_URL}/{path}", params=params, headers=headers,
-                                      timeout=self.cfg.http_timeout)
-            except requests.RequestException as exc:
-                last_error = f"{type(exc).__name__}: {exc}"
-                time.sleep(5 * attempt)
+                start = datetime.fromisoformat(ev["commence_time"].replace("Z", "+00:00"))
+            except (KeyError, ValueError):
                 continue
-            self.state["req_pocet"] = self.state.get("req_pocet", 0) + 1
-            remaining = resp.headers.get("x-ratelimit-requests-remaining")
-            if remaining is not None:
-                self.state["api_zbyva"] = remaining
-            if resp.status_code != 200:
-                raise HlidacError(f"HTTP {resp.status_code}: {resp.text[:200]}")
-            data = resp.json()
-            if data.get("errors"):
-                raise HlidacError(f"{path}: {data['errors']}")
-            return data
-        raise HlidacError(last_error)
-
-    def get_all(self, path: str, **params: Any) -> list[dict[str, Any]]:
-        out: list[dict[str, Any]] = []
-        page = 1
-        while True:
-            data = self.get(path, **params) if page == 1 else self.get(path, page=page, **params)
-            out += data.get("response", [])
-            paging = data.get("paging") or {}
-            if paging.get("current", 1) >= paging.get("total", 1):
-                return out
-            page += 1
+            if start <= now:                 # jen rozehrane zapasy
+                out.append(ev)
+        return out
 
 
 # --------------------------------------------------------------------------- #
-# Cteni kurzu
+# Logika
 # --------------------------------------------------------------------------- #
-def _num(value: Any) -> float | None:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def prematch_1x2(odds_item: dict[str, Any], preferred: list[str]) -> tuple[float, float, float] | None:
-    """(domaci, remiza, hoste) z preferovane kancelare, jinak prumer dostupnych."""
-    rows: list[tuple[str, float, float, float]] = []
-    for bookmaker in odds_item.get("bookmakers", []):
-        for bet in bookmaker.get("bets", []):
-            if (bet.get("name") or "").lower() not in WIN_MARKETS:
-                continue
-            values = {v.get("value"): _num(v.get("odd")) for v in bet.get("values", [])}
-            if values.get("Home") and values.get("Draw") and values.get("Away"):
-                rows.append((bookmaker.get("name", ""), values["Home"], values["Draw"], values["Away"]))
-    if not rows:
-        return None
-    for name in preferred:
-        for row in rows:
-            if row[0].lower() == name.lower():
-                return row[1:]
-    count = len(rows)
-    return tuple(sum(row[i] for row in rows) / count for i in (1, 2, 3))  # type: ignore[return-value]
-
-
-def live_odds(item: dict[str, Any], fav: str) -> dict[str, float | None]:
-    """Z /odds/live: kurz na vyhru favorita, remizu, soupere a dvojtip favorita."""
-    out: dict[str, float | None] = {"win": None, "draw": None, "opp": None, "dc": None}
-    fav_key, opp_key = ("Home", "Away") if fav == "home" else ("Away", "Home")
-    dc_keys = ("Home/Draw", "Home or Draw", "1X") if fav == "home" else ("Draw/Away", "Draw or Away", "X2")
-    for market in item.get("odds", []):
-        name = (market.get("name") or "").lower()
-        values: dict[str, float | None] = {}
-        for v in market.get("values", []):
-            if v.get("suspended"):
-                continue
-            if v.get("handicap") not in (None, "", "0", 0):
-                continue
-            values[v.get("value")] = _num(v.get("odd"))
-        if name in WIN_MARKETS and not out["win"]:
-            out["win"], out["draw"], out["opp"] = values.get(fav_key), values.get("Draw"), values.get(opp_key)
-        if name == "double chance" and not out["dc"]:
-            out["dc"] = next((values[k] for k in dc_keys if values.get(k)), None)
-    return out
-
-
 def fair_for(pre_odds: float) -> tuple[float, float] | tuple[None, None]:
     for max_pre, fair_win, fair_dc in FAIR_ODDS:
         if pre_odds <= max_pre:
@@ -223,35 +359,35 @@ def fair_for(pre_odds: float) -> tuple[float, float] | tuple[None, None]:
     return None, None
 
 
-# --------------------------------------------------------------------------- #
-# Spoustec
-# --------------------------------------------------------------------------- #
-def check_trigger(
-    fixture: dict[str, Any], cand: dict[str, Any], max_goal_minute: int = 15, max_elapsed: int = 18
-) -> tuple[str, Any]:
+def favourite(match: dict[str, Any], max_odds: float) -> tuple[str, float] | None:
+    """('home'|'away', kurz), kdyz ma zapas favorita do max_odds."""
+    home, away = match.get("odds_home"), match.get("odds_away")
+    if not home or not away:
+        return None
+    fav, pre = ("home", home) if home <= away else ("away", away)
+    return (fav, round(pre, 2)) if pre <= max_odds else None
+
+
+def check_trigger(match: dict[str, Any], cand: dict[str, Any], max_goal_minute: int = 15,
+                  max_elapsed: int = 18) -> tuple[str, Any]:
     """
     ("trigger", minuta_golu) | ("pryc", duvod) | ("cekej", None)
     Pravidlo: favorit prohrava presne 0:1 a gol soupere padl do max_goal_minute.
     """
-    status = fixture["fixture"]["status"]
-    short, elapsed = status.get("short"), status.get("elapsed") or 0
-    if short in NOT_STARTED:
-        return "cekej", None
-    if short in DEAD:
+    if match["status"] in DEAD_STATUSES:
         return "pryc", "zruseno/odlozeno"
-    goals_home = fixture["goals"]["home"] or 0
-    goals_away = fixture["goals"]["away"] or 0
-    fav_goals, opp_goals = (goals_home, goals_away) if cand["fav"] == "home" else (goals_away, goals_home)
+    if match["state"] == "pre":
+        return "cekej", None
+    if match["state"] == "post":
+        return "pryc", "konec zapasu"
+    fav_goals, opp_goals = ((match["home_score"], match["away_score"]) if cand["fav"] == "home"
+                            else (match["away_score"], match["home_score"]))
+    elapsed = match["minute"]
     if fav_goals == 0 and opp_goals == 1:
-        opp_id = cand["away_id"] if cand["fav"] == "home" else cand["home_id"]
-        minute = None
-        for event in fixture.get("events") or []:
-            if (event.get("type") == "Goal" and (event.get("team") or {}).get("id") == opp_id
-                    and event.get("detail") != "Missed Penalty"):
-                minute = (event.get("time") or {}).get("elapsed")
-                break
-        if minute is None:
-            minute = elapsed  # bez udalosti bereme aktualni minutu (konzervativne)
+        # Jediny gol zapasu -- jeho minuta (u vlastence ESPN pise tym ruzne,
+        # proto se nebere ohled na to, komu je gol pripsany).
+        minutes = [g["minute"] for g in match["goals"] if g["minute"] is not None]
+        minute = minutes[0] if minutes else elapsed
         if minute <= max_goal_minute:
             return "trigger", minute
         return "pryc", f"gol az v {minute}. min"
@@ -260,9 +396,6 @@ def check_trigger(
     return "cekej", None
 
 
-# --------------------------------------------------------------------------- #
-# Denni priprava, zaznam pripadu, vysledky
-# --------------------------------------------------------------------------- #
 def _send(notifier: TelegramNotifier | None, text: str) -> None:
     if notifier is None:
         log.info("(Telegram nenastaven) %s", text.replace("\n", " | "))
@@ -273,172 +406,214 @@ def _send(notifier: TelegramNotifier | None, text: str) -> None:
         log.error("Telegram: %s", exc)
 
 
-def prepare_day(api: ApiFootball, cfg: Config, state: dict[str, Any], day: str,
-                notifier: TelegramNotifier | None) -> None:
-    leagues = set(cfg.hlidac_leagues)
-    fixtures = api.get_all("fixtures", date=day, timezone=cfg.timezone)
-    fixtures = [f for f in fixtures
-                if f["league"]["id"] in leagues and f["fixture"]["status"]["short"] in NOT_STARTED]
-    by_league: dict[tuple[int, int], list[dict[str, Any]]] = {}
-    for f in fixtures:
-        by_league.setdefault((f["league"]["id"], f["league"]["season"]), []).append(f)
-
-    candidates: dict[str, dict[str, Any]] = {}
-    for (league_id, season), items in by_league.items():
-        try:
-            odds = {o["fixture"]["id"]: o
-                    for o in api.get_all("odds", league=league_id, season=season, date=day)}
-        except HlidacError as exc:
-            log.warning("Kurzy ligy %s: %s", league_id, exc)
-            continue
-        for f in items:
-            item = odds.get(f["fixture"]["id"])
-            prices = prematch_1x2(item, cfg.hlidac_bookmakers) if item else None
-            if not prices:
+def fetch_day(espn: Espn, cfg: Config, day: datetime) -> list[dict[str, Any]]:
+    """Zapasy sledovanych lig s vykopem v danem dni (prazsky cas)."""
+    start = day.replace(hour=0, minute=0, second=0, microsecond=0)
+    end = start + timedelta(days=1)
+    out, seen = [], set()
+    for league in cfg.hlidac_leagues:
+        for d in (start, end):                  # ESPN dny jsou v americkem case
+            try:
+                matches = espn.scoreboard(league, d.strftime("%Y%m%d"))
+            except HlidacError as exc:
+                log.warning("%s", exc)
                 continue
-            home, _, away = prices
-            fav, pre = ("home", home) if home <= away else ("away", away)
-            if pre <= cfg.hlidac_max_odds:
-                candidates[str(f["fixture"]["id"])] = {
-                    "kickoff": f["fixture"]["date"],
-                    "liga": f["league"]["name"], "zeme": f["league"]["country"],
-                    "home": f["teams"]["home"]["name"], "away": f["teams"]["away"]["name"],
-                    "home_id": f["teams"]["home"]["id"], "away_id": f["teams"]["away"]["id"],
-                    "fav": fav, "pre": round(pre, 2), "stav": "ceka", "pokusy_kurz": 0,
-                }
-    state["den"], state["kandidati"] = day, candidates
-    state.setdefault("k_dohrani", {})
-    log.info("%s: %s zapasu ve sledovanych ligach, favoritu do %.2f: %s",
-             day, len(fixtures), cfg.hlidac_max_odds, len(candidates))
-    if candidates:
-        lines = []
-        for c in sorted(candidates.values(), key=lambda c: c["kickoff"]):
-            when = datetime.fromisoformat(c["kickoff"]).astimezone(cfg.tz).strftime("%H:%M")
-            lines.append(f"{when} {c['home']} - {c['away']} (favorit {c[c['fav']]} {c['pre']})")
-        _send(notifier, f"Hlidac: dnes {len(candidates)} favoritu do {cfg.hlidac_max_odds}\n"
-                        + "\n".join(lines[:40]))
+            for m in matches:
+                if m["id"] in seen or not m["kickoff"]:
+                    continue
+                kickoff = _kickoff(m).astimezone(cfg.tz)
+                if start <= kickoff < end:
+                    seen.add(m["id"])
+                    out.append(m)
+    return out
 
 
-def record_case(api: ApiFootball, cfg: Config, state: dict[str, Any], fid: str,
+def plan_day(espn: Espn, cfg: Config, day: datetime) -> dict[str, dict[str, Any]]:
+    """Kandidati dne: favorite do HLIDAC_MAX_ODDS, kteri jeste nehraji."""
+    candidates: dict[str, dict[str, Any]] = {}
+    for m in fetch_day(espn, cfg, day):
+        if m["state"] != "pre":
+            continue
+        fav = favourite(m, cfg.hlidac_max_odds)
+        if fav is None:
+            continue
+        side, pre = fav
+        candidates[m["id"]] = {
+            "league": m["league"], "kickoff": m["kickoff"], "home": m["home"], "away": m["away"],
+            "home_id": m["home_id"], "away_id": m["away_id"],
+            "fav": side, "pre": pre, "stav": "ceka", "pokusy_kurz": 0,
+        }
+    return candidates
+
+
+def format_plan(candidates: dict[str, dict[str, Any]], cfg: Config) -> str:
+    if not candidates:
+        return f"Hlidac: dnes zadny favorit do {cfg.hlidac_max_odds} ve sledovanych ligach."
+    lines = []
+    for c in sorted(candidates.values(), key=lambda c: c["kickoff"]):
+        when = _kickoff(c).astimezone(cfg.tz).strftime("%H:%M")
+        lines.append(f"{when} {c['home']} - {c['away']} (favorit {c[c['fav']]} {c['pre']:.2f}, {c['league']})")
+    return (f"Hlidac: dnes {len(candidates)} favoritu do {cfg.hlidac_max_odds}\n" + "\n".join(lines[:40]))
+
+
+def record_case(odds_api: OddsApi | None, cfg: Config, state: dict[str, Any], mid: str,
                 cand: dict[str, Any], minute: int, elapsed: int,
                 notifier: TelegramNotifier | None) -> bool:
-    """Stahne zivy kurz, zapise pripad a posle zpravu. False = kurz jeste neni, zkusit znovu."""
-    try:
-        live = api.get("odds/live", fixture=fid).get("response", [])
-    except HlidacError as exc:
-        log.warning("Zivy kurz %s: %s", fid, exc)
-        live = []
-    odds = live_odds(live[0], cand["fav"]) if live else {"win": None, "draw": None, "opp": None, "dc": None}
-    if not odds["win"] and cand["pokusy_kurz"] < 3:
+    """Stahne zivy kurz, zapise pripad, posle zpravu. False = kurz jeste neni, zkusit znovu."""
+    fav_name = cand[cand["fav"]]
+    opp_name = cand["away"] if cand["fav"] == "home" else cand["home"]
+    prices = {"win": None, "win_max": None, "draw": None, "opp": None, "dc": None, "books": 0}
+    sport_key = ESPN_TO_ODDS.get(cand["league"])
+    if odds_api is not None and sport_key:
+        try:
+            event = match_odds_event(odds_api.live_events(sport_key), cand)
+            if event:
+                prices = live_prices(event, fav_name, opp_name)
+            else:
+                log.warning("Zapas %s - %s v nabidce The Odds API nenalezen.", cand["home"], cand["away"])
+        except HlidacError as exc:
+            log.warning("Zivy kurz: %s", exc)
+    if not prices["win"] and cand["pokusy_kurz"] < 2 and sport_key and odds_api is not None:
         cand["pokusy_kurz"] += 1          # kurzy byvaji po golu chvili zavrene
         return False
 
     fair_win, fair_dc = fair_for(cand["pre"])
     margin = cfg.hlidac_value_margin
-    value_win = bool(odds["win"] and fair_win and odds["win"] >= fair_win * margin)
-    value_dc = bool(odds["dc"] and fair_dc and odds["dc"] >= fair_dc * margin)
+    value_win = bool(prices["win"] and fair_win and prices["win"] >= fair_win * margin)
+    value_dc = bool(prices["dc"] and fair_dc and prices["dc"] >= fair_dc * margin)
     append_case({
-        "datum": datetime.now(cfg.tz).strftime("%Y-%m-%d"),
-        "liga": f"{cand['zeme']} - {cand['liga']}", "domaci": cand["home"], "hoste": cand["away"],
-        "fixture_id": fid, "favorit": cand[cand["fav"]], "kurz_pred": cand["pre"],
-        "minuta_golu": minute, "minuta_zaznamu": elapsed,
-        "live_vyhra": odds["win"], "live_remiza": odds["draw"], "live_soupere": odds["opp"],
-        "live_dvojtip": odds["dc"], "ferovy_vyhra": fair_win, "ferovy_dvojtip": fair_dc,
+        "datum": datetime.now(cfg.tz).strftime("%Y-%m-%d"), "liga": cand["league"],
+        "domaci": cand["home"], "hoste": cand["away"], "zapas_id": mid,
+        "favorit": fav_name, "kurz_pred": cand["pre"], "minuta_golu": minute, "minuta_zaznamu": elapsed,
+        "live_vyhra": prices["win"], "live_vyhra_max": prices["win_max"], "live_remiza": prices["draw"],
+        "live_soupere": prices["opp"], "live_dvojtip": prices["dc"], "kancelari": prices["books"],
+        "ferovy_vyhra": fair_win, "ferovy_dvojtip": fair_dc,
         "value_vyhra": int(value_win), "value_dvojtip": int(value_dc),
         "konec": "", "favorit_vyhral": "", "favorit_neprohral": "",
     })
-    state.setdefault("k_dohrani", {})[fid] = cand["fav"]
+    state.setdefault("k_dohrani", {})[mid] = {"fav": cand["fav"], "league": cand["league"],
+                                              "kickoff": cand["kickoff"]}
+
+    def fmt(v: Any) -> str:
+        return f"{v:.2f}" if v else "-"
 
     head = "VALUE" if (value_win or value_dc) else "bez value"
-    fmt = lambda v: f"{v:.2f}" if v else "-"  # noqa: E731
+    if prices["win"]:
+        live = (f"Zive (median {prices['books']} kancelari): vyhra {fmt(prices['win'])} "
+                f"(nejlepsi {fmt(prices['win_max'])}, ferovy {fair_win}, hranice {fair_win * margin:.2f})"
+                f" | dvojtip ~{fmt(prices['dc'])} (ferovy {fair_dc}, hranice {fair_dc * margin:.2f})")
+    else:
+        live = (f"Zivy kurz se nepodarilo zjistit. Hranice: vyhra {fair_win * margin:.2f}, "
+                f"dvojtip {fair_dc * margin:.2f}")
     _send(notifier,
           f"{head}: {cand['home']} - {cand['away']} 0:1 proti favoritovi ({minute}. min)\n"
-          f"Favorit {cand[cand['fav']]}, kurz pred zapasem {cand['pre']}\n"
-          f"Zive: vyhra {fmt(odds['win'])} (ferovy {fair_win}, hranice {fair_win * margin:.2f})"
-          f" | dvojtip {fmt(odds['dc'])} (ferovy {fair_dc}, hranice {fair_dc * margin:.2f})\n"
+          f"Favorit {fav_name}, kurz pred zapasem {cand['pre']:.2f}\n{live}\n"
           f"Zkontroluj kurz u Tipsportu/Fortuny. Nic se nesazi automaticky.")
-    log.info("ZAZNAM %s - %s zive %s", cand["home"], cand["away"], odds)
+    log.info("ZAZNAM %s - %s, zive %s", cand["home"], cand["away"], prices)
     return True
 
 
-def finish_results(api: ApiFootball, state: dict[str, Any]) -> int:
-    pending: dict[str, str] = state.get("k_dohrani", {})
+def finish_results(espn: Espn, cfg: Config, state: dict[str, Any]) -> int:
+    """Doplni konecny vysledek u zapsanych pripadu (ESPN, zdarma)."""
+    pending: dict[str, dict[str, Any]] = state.get("k_dohrani", {})
     if not pending:
         return 0
-    ids = list(pending)[:20]
-    fixtures = api.get("fixtures", ids="-".join(ids)).get("response", [])
     done: dict[str, tuple[str, int, int]] = {}
-    for f in fixtures:
-        if f["fixture"]["status"]["short"] not in FINISHED:
+    for mid, info in list(pending.items()):
+        day = _kickoff(info).astimezone(cfg.tz)
+        try:
+            matches = fetch_day(espn, replace(cfg, hlidac_leagues=[info["league"]]), day)
+        except HlidacError as exc:
+            log.warning("Vysledek %s: %s", mid, exc)
             continue
-        fid = str(f["fixture"]["id"])
-        gh, ga = f["score"]["fulltime"]["home"], f["score"]["fulltime"]["away"]
-        fav_goals, opp_goals = (gh, ga) if pending[fid] == "home" else (ga, gh)
-        done[fid] = (f"{gh}:{ga}", int(fav_goals > opp_goals), int(fav_goals >= opp_goals))
-    if not done:
-        return 0
-    rows = read_cases()
-    for row in rows:
-        if row["fixture_id"] in done and not row["konec"]:
-            row["konec"], row["favorit_vyhral"], row["favorit_neprohral"] = map(str, done[row["fixture_id"]])
-    write_cases(rows)
-    for fid in done:
-        pending.pop(fid, None)
-    log.info("Doplneny vysledky: %s", len(done))
+        match = next((m for m in matches if m["id"] == mid), None)
+        if match is None or match["state"] != "post":
+            continue
+        fav_goals, opp_goals = ((match["home_score"], match["away_score"]) if info["fav"] == "home"
+                                else (match["away_score"], match["home_score"]))
+        done[mid] = (f"{match['home_score']}:{match['away_score']}",
+                     int(fav_goals > opp_goals), int(fav_goals >= opp_goals))
+    if done:
+        rows = read_cases()
+        for row in rows:
+            if row["zapas_id"] in done and not row["konec"]:
+                row["konec"], row["favorit_vyhral"], row["favorit_neprohral"] = map(str, done[row["zapas_id"]])
+        write_cases(rows)
+        for mid in done:
+            pending.pop(mid, None)
+        log.info("Doplneny vysledky: %s", len(done))
     return len(done)
 
 
 # --------------------------------------------------------------------------- #
 # Hlavni smycka
 # --------------------------------------------------------------------------- #
+def _single_instance() -> socket.socket | None:
+    """Zabrany lokalni port = hlidac uz bezi (napr. spusteny planovacem i rucne)."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind(("127.0.0.1", LOCK_PORT))
+    except OSError:
+        sock.close()
+        return None
+    return sock
+
+
 def run(cfg: Config) -> int:
+    lock = _single_instance()
+    if lock is None:
+        log.info("Hlidac uz bezi, druhou instanci nespoustim.")
+        return 0
     state = load_state()
-    api = ApiFootball(cfg, state)
+    espn = Espn(cfg)
+    odds_api = OddsApi(cfg, state) if cfg.odds_api_key else None
     notifier = TelegramNotifier(cfg) if cfg.telegram_bot_token and cfg.telegram_chat_id else None
-    _send(notifier, f"Hlidac spusten. Sleduji {len(cfg.hlidac_leagues)} lig, "
-                    f"favorite do {cfg.hlidac_max_odds}, gol do {cfg.hlidac_goal_minute}. min.")
-    last_finish = 0.0
+    log.info("Hlidac spusten: %s lig, favorite do %.2f, gol do %s. min.",
+             len(cfg.hlidac_leagues), cfg.hlidac_max_odds, cfg.hlidac_goal_minute)
     window = timedelta(minutes=cfg.hlidac_window_minutes)
+    last_finish = 0.0
     while True:
         try:
             now = datetime.now(cfg.tz)
             day = now.strftime("%Y-%m-%d")
             if state.get("den") != day and now.hour >= cfg.hlidac_prep_hour:
-                prepare_day(api, cfg, state, day, notifier)
+                state["den"], state["kandidati"] = day, plan_day(espn, cfg, now)
+                log.info("%s: kandidatu %s", day, len(state["kandidati"]))
+                _send(notifier, format_plan(state["kandidati"], cfg))
                 save_state(state)
             candidates: dict[str, dict[str, Any]] = state.get("kandidati", {})
-            active = [
-                fid for fid, c in candidates.items()
-                if c["stav"] in ("ceka", "kurz")
-                and datetime.fromisoformat(c["kickoff"]) - timedelta(minutes=2) <= now
-                <= datetime.fromisoformat(c["kickoff"]) + window
-            ]
+            active = {mid: c for mid, c in candidates.items()
+                      if c["stav"] in ("ceka", "kurz")
+                      and _kickoff(c) - timedelta(minutes=2) <= now <= _kickoff(c) + window}
             if active:
-                for start in range(0, len(active), 20):
-                    batch = active[start:start + 20]
-                    for f in api.get("fixtures", ids="-".join(batch)).get("response", []):
-                        fid = str(f["fixture"]["id"])
-                        cand = candidates[fid]
-                        verdict, info = check_trigger(f, cand, cfg.hlidac_goal_minute,
+                for league in sorted({c["league"] for c in active.values()}):
+                    try:
+                        matches = {m["id"]: m for m in espn.scoreboard(league, _kickoff(
+                            next(c for c in active.values() if c["league"] == league)).strftime("%Y%m%d"))}
+                    except HlidacError as exc:
+                        log.warning("%s", exc)
+                        continue
+                    for mid, cand in active.items():
+                        if cand["league"] != league or mid not in matches:
+                            continue
+                        verdict, info = check_trigger(matches[mid], cand, cfg.hlidac_goal_minute,
                                                       cfg.hlidac_goal_minute + 3)
                         if verdict == "trigger":
                             cand["stav"] = "kurz"
-                            if record_case(api, cfg, state, fid, cand, info,
-                                           f["fixture"]["status"].get("elapsed") or 0, notifier):
+                            if record_case(odds_api, cfg, state, mid, cand, info,
+                                           matches[mid]["minute"], notifier):
                                 cand["stav"] = "zaznamenano"
-                        elif verdict == "pryc" and cand["stav"] in ("ceka", "kurz"):
+                        elif verdict == "pryc":
                             cand["stav"] = "nic"
                             log.info("%s - %s: %s", cand["home"], cand["away"], info)
-                for fid in active:
-                    cand = candidates[fid]
-                    if (cand["stav"] in ("ceka", "kurz")
-                            and now > datetime.fromisoformat(cand["kickoff"]) + window - timedelta(minutes=1)):
+                for cand in active.values():
+                    if cand["stav"] in ("ceka", "kurz") and now > _kickoff(cand) + window - timedelta(minutes=1):
                         cand["stav"] = "nic"
                 save_state(state)
                 time.sleep(cfg.hlidac_interval_seconds)
                 continue
-            if time.time() - last_finish > 3 * 3600 and state.get("k_dohrani"):
-                finish_results(api, state)
+            if time.time() - last_finish > 30 * 60 and state.get("k_dohrani"):
+                finish_results(espn, cfg, state)
                 save_state(state)
                 last_finish = time.time()
             time.sleep(60)
@@ -446,12 +621,8 @@ def run(cfg: Config) -> int:
             save_state(state)
             log.info("Ukonceno.")
             return 0
-        except HlidacError as exc:
-            log.error("API-Football: %s", exc)
-            save_state(state)
-            time.sleep(120)
         except Exception as exc:  # noqa: BLE001 - hlidac musi prezit cokoli
-            log.exception("Neocekavana chyba: %s", exc)
+            log.exception("Chyba: %s", exc)
             save_state(state)
             time.sleep(120)
 
@@ -471,33 +642,42 @@ def report(rows: list[dict[str, str]] | None = None) -> str:
                    f"{sum(ratio) / len(ratio):.2f}x")
         out.append(f"Kurz nad hranici VALUE: {sum(int(r['value_vyhra']) for r in with_odds)} z {len(with_odds)}")
     done = [r for r in with_odds if r["favorit_vyhral"] != ""]
-    for label, rows_sel in (("vsechny", done), ("jen VALUE", [r for r in done if r["value_vyhra"] == "1"])):
-        if not rows_sel:
+    for label, sel in (("vsechny", done), ("jen VALUE", [r for r in done if r["value_vyhra"] == "1"])):
+        if not sel:
             continue
-        pnl = [(float(r["live_vyhra"]) - 1) if r["favorit_vyhral"] == "1" else -1 for r in rows_sel]
-        wins = sum(r["favorit_vyhral"] == "1" for r in rows_sel)
-        out.append(f"Vyhra favorita - {label}: {len(rows_sel)} sazek, favorit vyhral {wins}x "
-                   f"({wins / len(rows_sel):.0%}), zisk {sum(pnl):+.2f} j., ROI {sum(pnl) / len(rows_sel):+.1%}")
+        pnl = [(float(r["live_vyhra"]) - 1) if r["favorit_vyhral"] == "1" else -1 for r in sel]
+        wins = sum(r["favorit_vyhral"] == "1" for r in sel)
+        out.append(f"Vyhra favorita - {label}: {len(sel)} sazek, favorit vyhral {wins}x "
+                   f"({wins / len(sel):.0%}), zisk {sum(pnl):+.2f} j., ROI {sum(pnl) / len(sel):+.1%}")
     out.append("Pozn.: pod ~50 pripady je vysledek hlavne nahoda. "
                "Rozhodujici je, jak casto je zivy kurz nad hranici.")
     return "\n".join(out)
 
 
 def diag(cfg: Config) -> int:
-    state = load_state()
-    api = ApiFootball(cfg, state)
-    status = api.get("status").get("response", {})
-    sub, req = status.get("subscription") or {}, status.get("requests") or {}
-    print(f"Ucet: {sub.get('plan')} | dnes pouzito: {req.get('current')} / {req.get('limit_day')}")
-    leagues = api.get("leagues", current="true").get("response", [])
-    names = {item["league"]["id"]: f"{item['country']['name']} - {item['league']['name']}" for item in leagues}
+    espn = Espn(cfg)
+    today = datetime.now(cfg.tz)
     problems = 0
-    for league_id in cfg.hlidac_leagues:
-        name = names.get(league_id)
-        if name is None:
+    print("Ligy (ESPN, program na dnes a zitra):")
+    for league in cfg.hlidac_leagues:
+        try:
+            n = sum(len(espn.scoreboard(league, (today + timedelta(days=d)).strftime("%Y%m%d")))
+                    for d in (0, 1))
+            live = "zivy kurz ano" if league in ESPN_TO_ODDS else "zivy kurz NE (chybi v ESPN_TO_ODDS)"
+            print(f"  {league:18} OK, zapasu {n:2}  | {live}")
+        except HlidacError as exc:
             problems += 1
-        print(f"  id {league_id:4} -> {name or '!!! NENALEZENO - oprav HLIDAC_LEAGUES'}")
-    save_state(state)
+            print(f"  {league:18} !!! {exc}")
+    if cfg.odds_api_key:
+        try:
+            r = requests.get("https://api.the-odds-api.com/v4/sports", params={"apiKey": cfg.odds_api_key},
+                             timeout=cfg.http_timeout)
+            print(f"The Odds API: OK, zbyva kreditu {r.headers.get('x-requests-remaining')} (dotaz zdarma)")
+        except requests.RequestException as exc:
+            problems += 1
+            print(f"The Odds API: chyba {exc}")
+    else:
+        print("The Odds API: chybi ODDS_API_KEY -- pripady se zapisou bez ziveho kurzu.")
     if cfg.telegram_bot_token and cfg.telegram_chat_id:
         _send(TelegramNotifier(cfg), "Hlidac: test spojeni OK")
         print("Telegram: testovaci zprava odeslana (zkontroluj mobil).")
@@ -506,17 +686,26 @@ def diag(cfg: Config) -> int:
     return 1 if problems else 0
 
 
+def _setup_logging() -> None:
+    fmt = logging.Formatter("%(asctime)s %(levelname)-7s %(message)s", datefmt="%d.%m. %H:%M:%S")
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    file_handler = RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+    file_handler.setFormatter(fmt)
+    root.addHandler(file_handler)
+    if sys.stdout is not None:            # pythonw (planovac) nema konzoli
+        console = logging.StreamHandler(sys.stdout)
+        console.setFormatter(fmt)
+        root.addHandler(console)
+
+
 def main(argv: list[str] | None = None) -> int:
     enable_utf8_stdout()
     parser = argparse.ArgumentParser(description="Hlidac zivych kurzu (favorit dostane gol do 15. minuty).")
-    parser.add_argument("command", choices=("run", "diag", "report", "selftest"), nargs="?", default="run")
+    parser.add_argument("command", choices=("run", "diag", "report", "plan"), nargs="?", default="run")
+    parser.add_argument("day", nargs="?", help="pro 'plan': den RRRR-MM-DD (vychozi dnes)")
     args = parser.parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(message)s",
-                        datefmt="%d.%m. %H:%M:%S")
-    if args.command == "selftest":
-        import selftest
-        selftest.test_hlidac()
-        return 1 if selftest.FAILURES else 0
+    _setup_logging()
     if args.command == "report":
         print(report())
         return 0
@@ -526,9 +715,11 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as exc:
         print(f"Chyba konfigurace: {exc}", file=sys.stderr)
         return 2
-    if not cfg.api_football_key:
-        print("Chybi API_FOOTBALL_KEY v .env (klic z dashboard.api-football.com).", file=sys.stderr)
-        return 2
+    if args.command == "plan":
+        day = (datetime.strptime(args.day, "%Y-%m-%d").replace(tzinfo=cfg.tz)
+               if args.day else datetime.now(cfg.tz))
+        print(format_plan(plan_day(Espn(cfg), cfg, day), cfg))
+        return 0
     return diag(cfg) if args.command == "diag" else run(cfg)
 
 
