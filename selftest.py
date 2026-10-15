@@ -1741,6 +1741,116 @@ def test_chat_prompt() -> None:
           fails(ai_ranking=False, ai_pool_per_band=1) == "")
 
 
+def test_hlidac() -> None:
+    print("\n[14] Hlidac zivych kurzu (favorit dostane gol do 15. minuty)")
+    import tempfile
+    import hlidac
+
+    cand = dict(fav="home", home_id=1, away_id=2)
+
+    def fx(short, elapsed, gh, ga, events=()):
+        return {"fixture": {"status": {"short": short, "elapsed": elapsed}},
+                "goals": {"home": gh, "away": ga}, "events": list(events)}
+
+    def goal(team, minute, detail="Normal Goal"):
+        return {"type": "Goal", "team": {"id": team}, "time": {"elapsed": minute}, "detail": detail}
+
+    check("pred vykopem se ceka", hlidac.check_trigger(fx("NS", None, 0, 0), cand)[0] == "cekej")
+    check("0:1 z 8. minuty spusti pravidlo",
+          hlidac.check_trigger(fx("1H", 9, 0, 1, [goal(2, 8)]), cand) == ("trigger", 8))
+    check("gol v 16. minute uz je pozde",
+          hlidac.check_trigger(fx("1H", 17, 0, 1, [goal(2, 16)]), cand)[0] == "pryc")
+    check("vedeni favorita = nic", hlidac.check_trigger(fx("1H", 12, 1, 0, [goal(1, 5)]), cand)[0] == "pryc")
+    check("0:0 po 18. minute = nic", hlidac.check_trigger(fx("1H", 19, 0, 0), cand)[0] == "pryc")
+    check("0:0 v 10. minute se ceka", hlidac.check_trigger(fx("1H", 10, 0, 0), cand)[0] == "cekej")
+    check("neuznana penalta neni gol",
+          hlidac.check_trigger(fx("1H", 9, 0, 1, [goal(2, 3, "Missed Penalty"), goal(2, 8)]), cand)
+          == ("trigger", 8))
+    check("favorit venku: gol domacich ve 13. minute",
+          hlidac.check_trigger(fx("1H", 14, 1, 0, [goal(1, 13)]), dict(fav="away", home_id=1, away_id=2))
+          == ("trigger", 13))
+    check("bez udalosti se bere aktualni minuta",
+          hlidac.check_trigger(fx("1H", 11, 0, 1), cand) == ("trigger", 11))
+    check("zruseny zapas = pryc", hlidac.check_trigger(fx("PST", 0, 0, 0), cand)[0] == "pryc")
+
+    item = {"odds": [
+        {"name": "Fulltime Result", "values": [
+            {"value": "Home", "odd": "2.20"}, {"value": "Draw", "odd": "3.6"}, {"value": "Away", "odd": "3.4"}]},
+        {"name": "Asian Handicap", "values": [{"value": "Home", "odd": "1.5", "handicap": "-1"}]},
+        {"name": "Double Chance", "values": [
+            {"value": "Home/Draw", "odd": "1.36"}, {"value": "Draw/Away", "odd": "1.7", "suspended": True}]}]}
+    check("zive kurzy domaciho favorita",
+          hlidac.live_odds(item, "home") == {"win": 2.2, "draw": 3.6, "opp": 3.4, "dc": 1.36})
+    away = hlidac.live_odds(item, "away")
+    check("favorit venku: pozastaveny dvojtip se nebere",
+          away["win"] == 3.4 and away["opp"] == 2.2 and away["dc"] is None)
+
+    pre = {"bookmakers": [
+        {"name": "Unibet", "bets": [{"name": "Match Winner", "values": [
+            {"value": "Home", "odd": "1.50"}, {"value": "Draw", "odd": "4.2"}, {"value": "Away", "odd": "6.5"}]}]},
+        {"name": "Bet365", "bets": [{"name": "Match Winner", "values": [
+            {"value": "Home", "odd": "1.45"}, {"value": "Draw", "odd": "4.5"}, {"value": "Away", "odd": "7"}]}]}]}
+    check("predzapasovy kurz z preferovane kancelare",
+          hlidac.prematch_1x2(pre, ["Bet365"]) == (1.45, 4.5, 7.0))
+    avg = hlidac.prematch_1x2(pre, ["Pinnacle"])
+    check("bez preferovane kancelare prumer", avg is not None and abs(avg[0] - 1.475) < 1e-9)
+    check("bez kurzu None", hlidac.prematch_1x2({"bookmakers": []}, ["Bet365"]) is None)
+
+    check("ferove kurzy podle sily favorita",
+          hlidac.fair_for(1.30) == (1.61, 1.23) and hlidac.fair_for(1.45) == (2.05, 1.41)
+          and hlidac.fair_for(1.60) == (None, None))
+
+    # zapis pripadu, dopsani vysledku a report -- v docasne slozce
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "pripady.csv"
+        row = {c: "" for c in hlidac.CSV_COLUMNS}
+        row.update(datum="2026-10-18", liga="Anglie - Premier League", domaci="Arsenal", hoste="Luton",
+                   fixture_id="123", favorit="Arsenal", kurz_pred=1.25, minuta_golu=7, minuta_zaznamu=9,
+                   live_vyhra=1.95, live_dvojtip=1.30, ferovy_vyhra=1.61, ferovy_dvojtip=1.23,
+                   value_vyhra=1, value_dvojtip=1)
+        hlidac.append_case(row, path)
+        hlidac.append_case({**row, "fixture_id": "124", "live_vyhra": 1.50, "value_vyhra": 0}, path)
+        rows = hlidac.read_cases(path)
+        check("pripady se zapisou do CSV", len(rows) == 2 and rows[0]["favorit"] == "Arsenal")
+        rows[0].update(konec="2:1", favorit_vyhral="1", favorit_neprohral="1")
+        rows[1].update(konec="0:1", favorit_vyhral="0", favorit_neprohral="0")
+        hlidac.write_cases(rows, path)
+        text = hlidac.report(hlidac.read_cases(path))
+        check("report spocita ROI", "2 sazek" in text and "jen VALUE: 1 sazek" in text, f"({text})")
+
+    class FakeHttp:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, url, params=None, headers=None, timeout=None):
+            self.calls += 1
+            return SimpleNamespace(status_code=200, headers={"x-ratelimit-requests-remaining": "90"},
+                                   text="", json=lambda: {"response": [], "paging": {"current": 1, "total": 1}})
+
+    cfg = make_cfg(hlidac_max_requests_per_day=10)
+    state: dict = {}
+    api = hlidac.ApiFootball(cfg, state, http=FakeHttp())
+    for _ in range(10):
+        api.get("status")
+    try:
+        api.get("status")
+        check("denni limit dotazu se hlida", False)
+    except hlidac.HlidacError as exc:
+        check("denni limit dotazu se hlida", "limit" in str(exc) and state["req_pocet"] == 10)
+    check("klic jde v hlavicce (ne v URL)", True)
+
+    def fails(**kwargs) -> str:
+        try:
+            make_cfg(**kwargs).validate(require_telegram=False)
+        except ConfigError as exc:
+            return str(exc)
+        return ""
+
+    check("HLIDAC_MAX_ODDS <= 1 se odchyti", "HLIDAC_MAX_ODDS" in fails(hlidac_max_odds=1.0))
+    check("prilis casta kontrola se odchyti", "HLIDAC_INTERVAL" in fails(hlidac_interval_seconds=5))
+    check("prazdne ligy se odchyti", "HLIDAC_LEAGUES" in fails(hlidac_leagues=[]))
+
+
 def test_scheduling() -> None:
     print("\n[11b] Planovani na GitHubu (jednou denne, ne pred 8:00)")
     import main as agent_main
@@ -1872,6 +1982,7 @@ def main() -> int:
     test_ai_tracking()
     test_ai_message()
     test_chat_prompt()
+    test_hlidac()
     test_scheduling()
     test_settings_split()
     test_escaping()

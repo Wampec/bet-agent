@@ -150,6 +150,16 @@ def _csv(key: str, default: str = "") -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+def _int_list(key: str, default: str = "") -> list[int]:
+    out: list[int] = []
+    for item in _csv(key, default):
+        try:
+            out.append(int(item))
+        except ValueError:
+            raise ConfigError(f"{key}: '{item}' neni cele cislo") from None
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # Konfiguracni objekt
 # --------------------------------------------------------------------------- #
@@ -168,6 +178,22 @@ class Config:
     odds_format: str = "decimal"
     http_timeout: int = 20
     http_retries: int = 3
+
+    # --- Hlidac zivych kurzu (hlidac.py) --------------------------------- #
+    # Samostatny program: favorit (kurz do HLIDAC_MAX_ODDS) dostane gol do
+    # HLIDAC_GOAL_MINUTE a prohrava 0:1 -> zaznamenat zivy kurz a poslat
+    # upozorneni. Data z API-Football (klic API_FOOTBALL_KEY v .env).
+    api_football_key: str = ""
+    hlidac_leagues: list[int] = field(default_factory=lambda: [39, 140, 78, 345])
+    hlidac_max_odds: float = 1.5
+    hlidac_goal_minute: int = 15
+    hlidac_window_minutes: int = 22
+    hlidac_interval_seconds: int = 180
+    hlidac_max_requests_per_day: int = 95
+    hlidac_prep_hour: int = 8
+    hlidac_bookmakers: list[str] = field(
+        default_factory=lambda: ["Bet365", "Pinnacle", "1xBet"])
+    hlidac_value_margin: float = 1.05
 
     # Kolik souteci se maximalne dotazuje. Souteze bez zapasu jsou zdarma,
     # takze realna spotreba odpovida poctu souteci, ktere zrovna hraji.
@@ -345,6 +371,18 @@ class Config:
             problems.append("VIRTUAL_STAKE musi byt > 0")
         if self.soccer_max_leagues < 1:
             problems.append("SOCCER_MAX_LEAGUES musi byt >= 1")
+        if self.hlidac_max_odds <= 1.0:
+            problems.append("HLIDAC_MAX_ODDS musi byt > 1")
+        if self.hlidac_interval_seconds < 30:
+            problems.append("HLIDAC_INTERVAL_SECONDS musi byt >= 30")
+        if self.hlidac_max_requests_per_day < 10:
+            problems.append("HLIDAC_MAX_REQUESTS_PER_DAY musi byt >= 10")
+        if not 0 <= self.hlidac_prep_hour <= 23:
+            problems.append("HLIDAC_PREP_HOUR musi byt 0-23")
+        if self.hlidac_value_margin < 1.0:
+            problems.append("HLIDAC_VALUE_MARGIN musi byt >= 1.0")
+        if not self.hlidac_leagues:
+            problems.append("HLIDAC_LEAGUES nesmi byt prazdne")
         if self.fallback_min_tips < 0:
             problems.append("FALLBACK_MIN_TIPS nesmi byt zaporne")
         if self.list_per_band < self.tips_per_band:
@@ -507,6 +545,16 @@ def load_config() -> Config:
     enable_soccer = _bool("ENABLE_SOCCER", False)
     return Config(
         odds_api_key=_str("ODDS_API_KEY"),
+        api_football_key=_str("API_FOOTBALL_KEY"),
+        hlidac_leagues=_int_list("HLIDAC_LEAGUES", "39,140,78,345"),
+        hlidac_max_odds=_float("HLIDAC_MAX_ODDS", 1.5),
+        hlidac_goal_minute=_int("HLIDAC_GOAL_MINUTE", 15),
+        hlidac_window_minutes=_int("HLIDAC_WINDOW_MINUTES", 22),
+        hlidac_interval_seconds=_int("HLIDAC_INTERVAL_SECONDS", 180),
+        hlidac_max_requests_per_day=_int("HLIDAC_MAX_REQUESTS_PER_DAY", 95),
+        hlidac_prep_hour=_int("HLIDAC_PREP_HOUR", 8),
+        hlidac_bookmakers=_csv("HLIDAC_BOOKMAKERS", "Bet365,Pinnacle,1xBet"),
+        hlidac_value_margin=_float("HLIDAC_VALUE_MARGIN", 1.05),
         telegram_bot_token=_str("TELEGRAM_BOT_TOKEN"),
         telegram_chat_id=_str("TELEGRAM_CHAT_ID"),
         odds_api_base=_str("ODDS_API_BASE", "https://api.the-odds-api.com/v4"),
