@@ -571,16 +571,18 @@ z Elo), takže jsou to hypotézy. Zapsané případy je buď potvrdí, nebo vyvr
 |---|---|---|
 | Program, favorit a předzápasový kurz | ESPN (neoficiální veřejné API, kurzy DraftKings) | zdarma, bez klíče |
 | Živé skóre a minuta gólu | ESPN | zdarma, bez klíče |
-| Živý kurz po gólu (medián evropských kanceláří) | The Odds API (`ODDS_API_KEY`) | 1 kredit, jen při spuštění pravidla |
+| **Živý kurz po gólu** (výhra, remíza, **skutečný dvojtip**) | ESPN — živé trhy Bet365 | zdarma, bez klíče |
+| Záloha, když ESPN živý kurz nemá | The Odds API (`ODDS_API_KEY`), medián evropských kanceláří | 1 kredit, dvojtip jen odhadem |
 | Konečný výsledek | ESPN | zdarma |
 
-Pravidlo se spouští zhruba 2–4× za víkend, takže hlídač spotřebuje asi
-10–20 kreditů The Odds API měsíčně (strop `HLIDAC_MAX_ODDS_CALLS` denně).
+Že ESPN dává i živé kurzy Bet365, ověřil hlídač naostro 15. 10. 2026:
+u Jagiellonie (0:1 ve 13. minutě) nabízel Bet365 výhru za 2,25 a dvojtip
+za 1,53 — oboje nad hranicí VALUE. The Odds API se tak volá jen výjimečně.
+
 Sleduje 19 soutěží: anglickou 1. a 2. ligu, Španělsko, Německo, Itálii,
 Francii, Nizozemsko, Portugalsko, Belgii, Turecko, Skotsko, Rakousko,
 Švýcarsko, Řecko, Norsko, Dánsko a tři evropské poháry. **Česká liga v ESPN
-není.** Dvojtip se z živé nabídky nestahuje zvlášť (stál by kredit navíc),
-hlídač ho odhaduje z kurzu na výhru a remízu.
+není.**
 
 Rizika: ESPN API je neoficiální a může se bez varování změnit (`python hlidac.py
 diag` to odhalí). API-Football by bylo oficiální, ale bezplatný tarif má jen

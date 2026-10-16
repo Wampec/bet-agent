@@ -19,8 +19,9 @@ Hlidac NIC NESAZI. Jen:
 Zdroje dat (bez registrace):
   - ESPN (neoficialni verejne API, zdarma, bez klice): program, predzapasovy
     kurz (DraftKings), zive skore a minuta golu, vysledek.
-  - The Odds API (klic ODDS_API_KEY, uz ho mame): zivy kurz evropskych
-    kancelari, jen pri spusteni pravidla -- 1 kredit za dotaz.
+  - ESPN take dava zive kurzy Bet365 (vyhra, remiza, dvojtip) -- primarni zdroj.
+  - The Odds API (klic ODDS_API_KEY): zaloha, kdyz ESPN zivy kurz nema
+    (1 kredit za dotaz, dvojtip jen odhadem).
 
 Ferove kurzy jsou odhad z historickych dat bez kurzu (sila favorita z Elo),
 takze je ber jako hypotezu, kterou zapsane pripady potvrdi nebo vyvrati.
@@ -103,7 +104,7 @@ FAIR_ODDS: tuple[tuple[float, float, float], ...] = ((1.40, 1.61, 1.23), (1.50, 
 CSV_COLUMNS = [
     "datum", "liga", "domaci", "hoste", "zapas_id", "favorit", "kurz_pred",
     "minuta_golu", "minuta_zaznamu", "live_vyhra", "live_vyhra_max", "live_remiza",
-    "live_soupere", "live_dvojtip", "kancelari", "ferovy_vyhra", "ferovy_dvojtip",
+    "live_soupere", "live_dvojtip", "kancelari", "zdroj", "ferovy_vyhra", "ferovy_dvojtip",
     "value_vyhra", "value_dvojtip", "konec", "favorit_vyhral", "favorit_neprohral",
 ]
 DEAD_STATUSES = {"STATUS_POSTPONED", "STATUS_CANCELED", "STATUS_ABANDONED",
@@ -128,6 +129,11 @@ def save_state(state: dict[str, Any], path: Path = STATE_FILE) -> None:
 
 
 def append_case(row: dict[str, Any], path: Path = CASES_FILE) -> None:
+    if path.exists():
+        with path.open(encoding="utf-8") as handle:
+            header = handle.readline().strip().split(";")
+        if header != CSV_COLUMNS:           # starsi soubor bez novych sloupcu
+            write_cases(read_cases(path), path)
     new = not path.exists()
     with path.open("a", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=CSV_COLUMNS, delimiter=";")
@@ -145,7 +151,7 @@ def read_cases(path: Path = CASES_FILE) -> list[dict[str, str]]:
 
 def write_cases(rows: list[dict[str, str]], path: Path = CASES_FILE) -> None:
     with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=CSV_COLUMNS, delimiter=";")
+        writer = csv.DictWriter(handle, fieldnames=CSV_COLUMNS, delimiter=";", extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -257,6 +263,45 @@ class Espn:
         return out
 
 
+def fraction_to_decimal(raw: Any) -> float | None:
+    """Britsky kurz '5/4' -> 2.25, 'EVS' -> 2.0; desetinne cislo projde."""
+    text = str(raw or "").strip().upper()
+    if text in ("EVS", "EVENS"):
+        return 2.0
+    try:
+        if "/" in text:
+            num, den = text.split("/", 1)
+            return round(1 + float(num) / float(den), 3)
+        value = float(text)
+    except (ValueError, ZeroDivisionError):
+        return None
+    return value if value > 1 else None
+
+
+def espn_live_prices(offers: list[dict[str, Any]], fav: str) -> dict[str, Any]:
+    """
+    Zive kurzy Bet365 z ESPN (trhy live*): vyhra favorita, remiza, souper
+    a skutecny dvojtip 'favorit neprohraje'. Zdarma, bez kreditu.
+    """
+    empty = {"win": None, "win_max": None, "draw": None, "opp": None, "dc": None, "books": 0}
+    fav_key, opp_key = ("Home", "Away") if fav == "home" else ("Away", "Home")
+    dc_key = "liveDoubleChanceHomeOrDraw" if fav == "home" else "liveDoubleChanceDrawOrAway"
+    for offer in offers:
+        team_odds = (offer.get("bettingOdds") or {}).get("teamOdds") or {}
+        win = fraction_to_decimal((team_odds.get(f"liveFullTimeResult{fav_key}") or {}).get("value"))
+        if not win:
+            continue
+        return {
+            "win": win, "win_max": None,
+            "draw": fraction_to_decimal((team_odds.get("liveFullTimeResultDraw") or {}).get("value")),
+            "opp": fraction_to_decimal((team_odds.get(f"liveFullTimeResult{opp_key}") or {}).get("value")),
+            "dc": fraction_to_decimal((team_odds.get(dc_key) or {}).get("value")),
+            "books": 1,
+            "source": (offer.get("provider") or {}).get("name", "ESPN") + " (ESPN)",
+        }
+    return empty
+
+
 def save_snapshot(espn: Espn, cand: dict[str, Any], mid: str, minute: int, tag: str) -> None:
     """
     Mereni zdarma: ulozi, co ESPN o kurzech vraci behem zapasu. Az bude jasne,
@@ -308,28 +353,33 @@ def match_odds_event(events: list[dict[str, Any]], cand: dict[str, Any]) -> dict
             continue
         if abs((start - kickoff).total_seconds()) > 3 * 3600:
             continue
-        score = (team_similarity(ev.get("home_team", ""), cand["home"])
-                 + team_similarity(ev.get("away_team", ""), cand["away"])) / 2
+        home = team_similarity(ev.get("home_team", ""), cand["home"])
+        away = team_similarity(ev.get("away_team", ""), cand["away"])
+        # Nazvy se mezi zdroji lisi ('Stade Rennais' x 'Rennes'); stejny cas
+        # vykopu a jeden jiste shodny tym staci.
+        score = max((home + away) / 2, 0.8 if max(home, away) >= 0.85 else 0.0)
         if score > best_score:
             best, best_score = ev, score
     return best if best_score >= 0.6 else None
 
 
-def live_prices(event: dict[str, Any], fav_name: str, opp_name: str) -> dict[str, Any]:
+def live_prices(event: dict[str, Any], fav: str) -> dict[str, Any]:
     """Z h2h nabidek kancelari: median a nejlepsi kurz favorita, remiza, souper, odhad dvojtipu."""
+    # Nazvy bereme z teze nabidky, ne z ESPN -- tak se nemuzou rozejit.
+    fav_name = event.get("home_team", "") if fav == "home" else event.get("away_team", "")
+    opp_name = event.get("away_team", "") if fav == "home" else event.get("home_team", "")
     fav_prices, draw_prices, opp_prices = [], [], []
     for bm in event.get("bookmakers") or []:
         for market in bm.get("markets") or []:
             if market.get("key") != "h2h":
                 continue
             outcomes = {o.get("name"): o.get("price") for o in market.get("outcomes") or []}
-            fav = next((p for n, p in outcomes.items() if n and team_similarity(n, fav_name) >= 0.8), None)
-            opp = next((p for n, p in outcomes.items() if n and team_similarity(n, opp_name) >= 0.8), None)
+            fav_price, opp_price = outcomes.get(fav_name), outcomes.get(opp_name)
             draw = outcomes.get("Draw")
-            if fav and draw and opp:
-                fav_prices.append(float(fav))
+            if fav_price and draw and opp_price:
+                fav_prices.append(float(fav_price))
                 draw_prices.append(float(draw))
-                opp_prices.append(float(opp))
+                opp_prices.append(float(opp_price))
     if not fav_prices:
         return {"win": None, "win_max": None, "draw": None, "opp": None, "dc": None, "books": 0}
     win = statistics.median(fav_prices)
@@ -340,6 +390,7 @@ def live_prices(event: dict[str, Any], fav_name: str, opp_name: str) -> dict[str
         # Dvojtip se v nabidce h2h nestahuje (stal by kredit navic): odhad z vyhry a remizy.
         "dc": round(1 / (1 / win + 1 / draw), 2),
         "books": len(fav_prices),
+        "source": "The Odds API (dvojtip jen odhad)",
     }
 
 
@@ -491,25 +542,36 @@ def format_plan(candidates: dict[str, dict[str, Any]], cfg: Config) -> str:
     return (f"Hlidac: dnes {len(candidates)} favoritu do {cfg.hlidac_max_odds}\n" + "\n".join(lines[:40]))
 
 
-def record_case(odds_api: OddsApi | None, cfg: Config, state: dict[str, Any], mid: str,
-                cand: dict[str, Any], minute: int, elapsed: int,
+def record_case(espn: Espn | None, odds_api: OddsApi | None, cfg: Config, state: dict[str, Any],
+                mid: str, cand: dict[str, Any], minute: int, elapsed: int,
                 notifier: TelegramNotifier | None) -> bool:
-    """Stahne zivy kurz, zapise pripad, posle zpravu. False = kurz jeste neni, zkusit znovu."""
+    """
+    Zjisti zivy kurz, zapise pripad, posle zpravu. False = kurz jeste neni,
+    zkusit znovu (po golu byvaji kurzy chvili zavrene).
+    Poradi zdroju: ESPN / Bet365 (zdarma, vcetne skutecneho dvojtipu), az pri
+    poslednim pokusu The Odds API (1 kredit).
+    """
     fav_name = cand[cand["fav"]]
-    opp_name = cand["away"] if cand["fav"] == "home" else cand["home"]
-    prices = {"win": None, "win_max": None, "draw": None, "opp": None, "dc": None, "books": 0}
+    prices: dict[str, Any] = {"win": None, "win_max": None, "draw": None, "opp": None,
+                              "dc": None, "books": 0, "source": ""}
+    if espn is not None:
+        try:
+            prices = espn_live_prices(espn.odds_snapshot(cand["league"], mid), cand["fav"])
+        except (requests.RequestException, ValueError) as exc:
+            log.warning("Zivy kurz ESPN: %s", exc)
+    last_try = cand["pokusy_kurz"] >= 2
     sport_key = ESPN_TO_ODDS.get(cand["league"])
-    if odds_api is not None and sport_key:
+    if not prices["win"] and last_try and odds_api is not None and sport_key:
         try:
             event = match_odds_event(odds_api.live_events(sport_key), cand)
             if event:
-                prices = live_prices(event, fav_name, opp_name)
+                prices = live_prices(event, cand["fav"])
             else:
                 log.warning("Zapas %s - %s v nabidce The Odds API nenalezen.", cand["home"], cand["away"])
         except HlidacError as exc:
             log.warning("Zivy kurz: %s", exc)
-    if not prices["win"] and cand["pokusy_kurz"] < 2 and sport_key and odds_api is not None:
-        cand["pokusy_kurz"] += 1          # kurzy byvaji po golu chvili zavrene
+    if not prices["win"] and not last_try:
+        cand["pokusy_kurz"] += 1
         return False
 
     fair_win, fair_dc = fair_for(cand["pre"])
@@ -522,6 +584,7 @@ def record_case(odds_api: OddsApi | None, cfg: Config, state: dict[str, Any], mi
         "favorit": fav_name, "kurz_pred": cand["pre"], "minuta_golu": minute, "minuta_zaznamu": elapsed,
         "live_vyhra": prices["win"], "live_vyhra_max": prices["win_max"], "live_remiza": prices["draw"],
         "live_soupere": prices["opp"], "live_dvojtip": prices["dc"], "kancelari": prices["books"],
+        "zdroj": prices.get("source", ""),
         "ferovy_vyhra": fair_win, "ferovy_dvojtip": fair_dc,
         "value_vyhra": int(value_win), "value_dvojtip": int(value_dc),
         "konec": "", "favorit_vyhral": "", "favorit_neprohral": "",
@@ -534,9 +597,10 @@ def record_case(odds_api: OddsApi | None, cfg: Config, state: dict[str, Any], mi
 
     head = "VALUE" if (value_win or value_dc) else "bez value"
     if prices["win"]:
-        live = (f"Zive (median {prices['books']} kancelari): vyhra {fmt(prices['win'])} "
-                f"(nejlepsi {fmt(prices['win_max'])}, ferovy {fair_win}, hranice {fair_win * margin:.2f})"
-                f" | dvojtip ~{fmt(prices['dc'])} (ferovy {fair_dc}, hranice {fair_dc * margin:.2f})")
+        best = f", nejlepsi {fmt(prices['win_max'])}" if prices.get("win_max") else ""
+        live = (f"Zive ({prices.get('source') or 'kurz'}): vyhra {fmt(prices['win'])}{best} "
+                f"(ferovy {fair_win}, hranice {fair_win * margin:.2f})"
+                f" | dvojtip {fmt(prices['dc'])} (ferovy {fair_dc}, hranice {fair_dc * margin:.2f})")
     else:
         live = (f"Zivy kurz se nepodarilo zjistit. Hranice: vyhra {fair_win * margin:.2f}, "
                 f"dvojtip {fair_dc * margin:.2f}")
@@ -641,7 +705,7 @@ def run(cfg: Config) -> int:
                             if cand["stav"] == "ceka":
                                 save_snapshot(espn, cand, mid, match["minute"], "gol")
                             cand["stav"] = "kurz"
-                            if record_case(odds_api, cfg, state, mid, cand, info,
+                            if record_case(espn, odds_api, cfg, state, mid, cand, info,
                                            matches[mid]["minute"], notifier):
                                 cand["stav"] = "zaznamenano"
                         elif verdict == "pryc":
