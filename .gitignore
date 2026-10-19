@@ -24,3 +24,6 @@ hlidac_espn_kurzy/
 
 # POZOR: tips.json (denik tipu) v repozitari BYT MUSI -- GitHub Actions
 # si do nej po kazdem behu zapisuje historii a statistiky pasem.
+
+# Stazena data pro analyzy
+analyzy/cache/

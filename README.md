@@ -545,25 +545,39 @@ Druhý, nezávislý program. Nehledá tipy před zápasem, ale **jednu konkrétn
 situaci v zápase**, u které historická data ukazují, že trh favorita
 podceňuje:
 
-> Fotbalový favorit s kurzem do 1,5 dostane gól do 15. minuty a prohrává 0:1.
+> Fotbalový favorit s kurzem do 1,40 dostane první gól od soupeře do 20. minuty
+> a prohrává 0:1.
 
-Podle dat z 16 evropských lig (2000–2023, ~900 takových zápasů) favorit přesto
-vyhraje v ~54 % a neprohraje v ~75 % — výrazně víc, než by odpovídalo prostému
-modelu (41 % / 67 %). Čím silnější favorit, tím větší rozdíl: u kurzu kolem
-1,20 je to 62 % proti 48 %. Férové kurzy z toho vycházejí takhle:
+Nastavení vychází z analýzy 19 461 zápasů s favoritem v 15 evropských ligách
+(sezóny 2012/13–2024/25). Předzápasové kurzy jsou závěrečné kurzy Pinnacle
+a Bet365 (football-data.co.uk), minuty gólů z GitHubu (schochastics/football-data).
+Favorit do 1,40, soupeř dá první gól v minutě:
 
-| Kurz favorita před zápasem | Férový kurz na výhru | Férový kurz na dvojtip (1X / X2) |
-|---|---|---|
-| do 1,40 | 1,61 | 1,23 |
-| 1,40–1,50 | 2,05 | 1,41 |
+| Minuta | Zápasů | Favorit vyhraje | Neprohraje |
+|---|---|---|---|
+| 1.–10. | 399 | 65 % | 83 % |
+| 11.–15. | 140 | 65 % | 84 % |
+| 16.–20. | 128 | 63 % | 82 % |
+| 21.–25. | 118 | **49 %** | 70 % |
+| 26.–30. | 106 | 50 % | 73 % |
 
-**Hranice VALUE** = férový kurz + 5 % (`HLIDAC_VALUE_MARGIN`): výhra nad 1,69
-resp. 2,15, dvojtip nad 1,29 resp. 1,48. Pokud kancelář po gólu nabídne víc,
-sázka má kladnou hodnotu. Pokud skočí jen na 1,8, kancelář efekt zná a výhoda
-není. **Právě to zbývá ověřit** — proto hlídač v prvních týdnech jen zapisuje.
+Do 20. minuty je úspěšnost stabilní, od 21. minuty spadne — proto hranice
+20. minuta. Favorité 1,41–1,50 po gólu soupeře vyhrávají jen ve 42 %, proto
+strop 1,40. Férové kurzy podle síly favorita (gól soupeře do 20. minuty):
 
-Důležité: férové kurzy pocházejí z dat bez kurzů (síla favorita odhadnutá
-z Elo), takže jsou to hypotézy. Zapsané případy je buď potvrdí, nebo vyvrátí.
+| Kurz favorita před zápasem | Zápasů | Vyhraje | Férový kurz na výhru | Férový dvojtip (1X / X2) |
+|---|---|---|---|---|
+| do 1,25 | 274 | 74 % | 1,36 | 1,13 |
+| 1,26–1,40 | 393 | 59 % | 1,71 | 1,26 |
+
+**Hranice VALUE** = férový kurz + 5 % (`HLIDAC_VALUE_MARGIN`): výhra nad 1,43
+resp. 1,80, dvojtip nad 1,19 resp. 1,32. Pokud kancelář po gólu nabídne víc,
+sázka má kladnou hodnotu. **Jestli to kanceláře opravdu nabízejí, zbývá
+ověřit** — proto hlídač v prvních týdnech jen zapisuje. První náznak:
+Jagiellonia (15. 10.) měla u Bet365 po gólu ve 11. minutě kurz 2,25.
+
+Soupeř dá první gól do 20. minuty zhruba v 8 % zápasů favorita, což v našich
+soutěžích dělá asi 1–2 případy za víkend plus evropské poháry.
 
 ### Odkud bere data (zdarma, bez registrace)
 
@@ -592,10 +606,10 @@ diag` to odhalí). API-Football by bylo oficiální, ale bezplatný tarif má je
 ### Co hlídač dělá
 
 1. Ráno (`HLIDAC_PREP_HOUR`) stáhne program sledovaných soutěží a pošle na
-   Telegram seznam dnešních favoritů do 1,5.
-2. Od výkopu do `HLIDAC_WINDOW_MINUTES` (22. minuty) kontroluje skóre každých
+   Telegram seznam dnešních favoritů do 1,40.
+2. Od výkopu do `HLIDAC_WINDOW_MINUTES` (27. minuty) kontroluje skóre každých
    `HLIDAC_INTERVAL_SECONDS` (60 s).
-3. Když padne 0:1 proti favoritovi do 15. minuty, stáhne živé kurzy, porovná je
+3. Když padne 0:1 proti favoritovi do 20. minuty, stáhne živé kurzy, porovná je
    s férovou hranicí a pošle zprávu **VALUE** / **bez value**. Případ zapíše do
    `hlidac_pripady.csv`.
 4. Po zápase dopíše výsledek. `python hlidac.py report` spočítá, jak často byl
@@ -655,8 +669,8 @@ v `settings.env`.
 | `MAX_HOURS_AHEAD` | `24` | den i následující noc |
 | `TRACK_RESULTS` | `true` | hlásit, jak dopadly minulé tipy |
 | `HLIDAC_LEAGUES` | 19 soutěží | kódy soutěží ESPN, které hlídač sleduje |
-| `HLIDAC_MAX_ODDS` | `1.5` | hlídají se jen favorité s kurzem do této hodnoty |
-| `HLIDAC_GOAL_MINUTE` | `15` | gól soupeře musí padnout do této minuty |
+| `HLIDAC_MAX_ODDS` | `1.40` | hlídají se jen favorité s kurzem do této hodnoty |
+| `HLIDAC_GOAL_MINUTE` | `20` | gól soupeře musí padnout do této minuty |
 | `HLIDAC_INTERVAL_SECONDS` | `60` | jak často se kontroluje skóre (ESPN je zdarma) |
 | `HLIDAC_MAX_ODDS_CALLS` | `10` | denní strop dotazů na živé kurzy (1 kredit = 1 dotaz) |
 | `HLIDAC_VALUE_MARGIN` | `1.05` | VALUE = živý kurz aspoň o 5 % nad férovým |

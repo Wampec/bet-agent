@@ -1837,8 +1837,13 @@ def test_hlidac() -> None:
           and prices["dc"] is not None and 1.3 < prices["dc"] < 1.45, f"({prices})")
 
     check("ferove kurzy podle sily favorita",
-          hlidac.fair_for(1.30) == (1.61, 1.23) and hlidac.fair_for(1.45) == (2.05, 1.41)
-          and hlidac.fair_for(1.60) == (None, None))
+          hlidac.fair_for(1.20) == (1.36, 1.13) and hlidac.fair_for(1.30) == (1.71, 1.26)
+          and hlidac.fair_for(1.45) == (2.37, 1.41) and hlidac.fair_for(1.60) == (None, None))
+    check("20. minuta jeste spusti, 21. uz ne",
+          hlidac.check_trigger(hlidac.parse_event(espn_event(clock=1260, goals=((2, 1140.0),)), "eng.1"),
+                               cand, 20, 23) == ("trigger", 20)
+          and hlidac.check_trigger(hlidac.parse_event(espn_event(clock=1300, goals=((2, 1200.0),)), "eng.1"),
+                                   cand, 20, 23)[0] == "pryc")
 
     class FakeEspn:
         def __init__(self, offers):

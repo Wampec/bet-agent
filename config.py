@@ -187,9 +187,9 @@ class Config:
         "eng.1", "esp.1", "ger.1", "ita.1", "fra.1", "ned.1", "por.1", "bel.1",
         "tur.1", "sco.1", "aut.1", "sui.1", "gre.1", "nor.1", "den.1", "eng.2",
         "uefa.champions", "uefa.europa", "uefa.europa.conf"])
-    hlidac_max_odds: float = 1.5
-    hlidac_goal_minute: int = 15
-    hlidac_window_minutes: int = 22
+    hlidac_max_odds: float = 1.40
+    hlidac_goal_minute: int = 20
+    hlidac_window_minutes: int = 27
     hlidac_interval_seconds: int = 60
     hlidac_max_odds_calls: int = 10     # dotazu na zive kurzy denne (1 kredit = 1 dotaz)
     hlidac_prep_hour: int = 8
@@ -548,9 +548,9 @@ def load_config() -> Config:
         hlidac_leagues=_csv("HLIDAC_LEAGUES", "eng.1,esp.1,ger.1,ita.1,fra.1,ned.1,por.1,"
                             "bel.1,tur.1,sco.1,aut.1,sui.1,gre.1,nor.1,den.1,eng.2,"
                             "uefa.champions,uefa.europa,uefa.europa.conf"),
-        hlidac_max_odds=_float("HLIDAC_MAX_ODDS", 1.5),
-        hlidac_goal_minute=_int("HLIDAC_GOAL_MINUTE", 15),
-        hlidac_window_minutes=_int("HLIDAC_WINDOW_MINUTES", 22),
+        hlidac_max_odds=_float("HLIDAC_MAX_ODDS", 1.40),
+        hlidac_goal_minute=_int("HLIDAC_GOAL_MINUTE", 20),
+        hlidac_window_minutes=_int("HLIDAC_WINDOW_MINUTES", 27),
         hlidac_interval_seconds=_int("HLIDAC_INTERVAL_SECONDS", 60),
         hlidac_max_odds_calls=_int("HLIDAC_MAX_ODDS_CALLS", 10),
         hlidac_prep_hour=_int("HLIDAC_PREP_HOUR", 8),

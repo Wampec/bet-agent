@@ -3,12 +3,12 @@ hlidac.py -- hlidac zivych kurzu. Bezi na tvem pocitaci.
 
 Pravidlo
 --------
-Fotbalovy favorit s kurzem do HLIDAC_MAX_ODDS (1,5) dostane gol do
-HLIDAC_GOAL_MINUTE (15.) a prohrava presne 0:1. Historicka data (16 evropskych
-lig, 2000-2023, ~900 takovych zapasu) rikaji, ze favorit presto vyhraje
-v ~54 % (ferovy kurz 1,85) a neprohraje v ~75 % (ferovy kurz 1,33) -- vic, nez
-by odpovidalo prostemu modelu. Pokud kancelar v tu chvili nabizi kurz nad
-ferovym + rezerva, ma sazka kladnou hodnotu.
+Fotbalovy favorit s kurzem do HLIDAC_MAX_ODDS (1,40) dostane prvni gol od
+soupere do HLIDAC_GOAL_MINUTE (20.) a prohrava 0:1. Historicka data (15 lig,
+2012/13-2024/25, zaviraci kurzy Pinnacle/Bet365, 667 takovych zapasu) rikaji,
+ze favorit presto vyhraje v ~65 % a neprohraje v ~83 %. Od 21. minuty
+uspesnost spadne na ~49 %, proto hranice 20. minuta. Pokud kancelar v tu
+chvili nabizi kurz nad ferovym + rezerva, ma sazka kladnou hodnotu.
 
 Hlidac NIC NESAZI. Jen:
   - rano posle seznam dnesnich favoritu ve sledovanych ligach,
@@ -97,9 +97,13 @@ ESPN_TO_ODDS: dict[str, str] = {
 
 # Ferove kurzy z historickych dat: (max predzapasovy kurz favorita,
 # ferovy kurz na vyhru, ferovy kurz na dvojtip "favorit neprohraje").
-#   do 1,40:   po 0:1 do 15. min vyhraje 61,9 %  -> 1,61;  neprohraje 81 % -> 1,23
-#   1,40-1,50: vyhraje 48,7 %                    -> 2,05;  neprohraje 71 % -> 1,41
-FAIR_ODDS: tuple[tuple[float, float, float], ...] = ((1.40, 1.61, 1.23), (1.50, 2.05, 1.41))
+# Soupere da prvni gol do 20. minuty (15 lig, 2012/13-2024/25):
+#   do 1,25:    274 zapasu, vyhraje 73,7 % -> 1,36;  neprohraje 88,3 % -> 1,13
+#   1,26-1,40:  393 zapasu, vyhraje 58,5 % -> 1,71;  neprohraje 79,1 % -> 1,26
+#   1,41-1,50:  355 zapasu, vyhraje 42,3 % -> 2,37;  neprohraje 71,0 % -> 1,41
+#               (jen kdyby se HLIDAC_MAX_ODDS vratil nad 1,40)
+FAIR_ODDS: tuple[tuple[float, float, float], ...] = (
+    (1.25, 1.36, 1.13), (1.40, 1.71, 1.26), (1.50, 2.37, 1.41))
 
 CSV_COLUMNS = [
     "datum", "liga", "domaci", "hoste", "zapas_id", "favorit", "kurz_pred",
