@@ -30,6 +30,7 @@ Prikazy:
     python hlidac.py plan [RRRR-MM-DD]  favorite dne (zdarma, nic neposila)
     python hlidac.py diag               kontrola lig, kreditu a Telegramu
     python hlidac.py run                hlidani (nechat bezet, Ctrl+C ukonci)
+    python hlidac.py den                jeden den hlidani a konec (GitHub Actions)
     python hlidac.py report             vyhodnoceni zapsanych pripadu
 
 Nastaveni je v settings.env (HLIDAC_*), Telegram stejne jako u denniho agenta.
@@ -68,7 +69,6 @@ CASES_FILE = BASE_DIR / "hlidac_pripady.csv"
 LOG_FILE = BASE_DIR / "hlidac.log"
 ESPN_ODDS_URL = ("https://sports.core.api.espn.com/v2/sports/soccer/leagues/{league}"
                  "/events/{event}/competitions/{event}/odds")
-SNAPSHOT_DIR = BASE_DIR / "hlidac_espn_kurzy"   # mereni: dava ESPN kurzy i behem zapasu?
 LOCK_PORT = 47613          # jedna instance: obsazeny port = hlidac uz bezi
 
 # Liga ESPN -> soutez The Odds API (pro zivy kurz). Bez mapovani se pripad
@@ -304,24 +304,6 @@ def espn_live_prices(offers: list[dict[str, Any]], fav: str) -> dict[str, Any]:
             "source": (offer.get("provider") or {}).get("name", "ESPN") + " (ESPN)",
         }
     return empty
-
-
-def save_snapshot(espn: Espn, cand: dict[str, Any], mid: str, minute: int, tag: str) -> None:
-    """
-    Mereni zdarma: ulozi, co ESPN o kurzech vraci behem zapasu. Az bude jasne,
-    jestli se kurzy po golu meni, muze ESPN nahradit The Odds API uplne.
-    """
-    try:
-        data = espn.odds_snapshot(cand["league"], mid)
-    except (requests.RequestException, ValueError) as exc:
-        log.warning("Snimek kurzu ESPN %s: %s", mid, exc)
-        return
-    SNAPSHOT_DIR.mkdir(exist_ok=True)
-    path = SNAPSHOT_DIR / f"{mid}_{tag}_{minute:02d}min.json"
-    path.write_text(json.dumps({"zapas": f"{cand['home']} - {cand['away']}", "minuta": minute,
-                                "cas": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                                "nabidky": data}, ensure_ascii=False, indent=1), encoding="utf-8")
-    log.info("Snimek kurzu ESPN ulozen: %s (%s nabidek)", path.name, len(data))
 
 
 # --------------------------------------------------------------------------- #
@@ -662,7 +644,68 @@ def _single_instance() -> socket.socket | None:
     return sock
 
 
-def run(cfg: Config) -> int:
+EXIT_CONTINUE = 75     # beh na GitHubu: den jeste neskoncil, spust pokracovani
+
+
+def day_remaining(state: dict[str, Any], cfg: Config, now: datetime) -> bool:
+    """Zbyva dnes jeste neco hlidat? (kandidat, jehoz okno jeste neskoncilo)"""
+    window = timedelta(minutes=cfg.hlidac_window_minutes)
+    return any(c["stav"] in ("ceka", "kurz") and now <= _kickoff(c) + window
+               for c in (state.get("kandidati") or {}).values())
+
+
+def step(espn: Espn, odds_api: OddsApi | None, cfg: Config, state: dict[str, Any],
+         notifier: TelegramNotifier | None, now: datetime) -> bool:
+    """
+    Jeden krok hlidani: rano naplanuje den, behem zapasu zkontroluje skore.
+    Vraci True, kdyz prave bezi okno nejakeho zapasu (pak se kontroluje casteji).
+    """
+    window = timedelta(minutes=cfg.hlidac_window_minutes)
+    day = now.strftime("%Y-%m-%d")
+    if state.get("den") != day and now.hour >= cfg.hlidac_prep_hour:
+        state["den"], state["kandidati"] = day, plan_day(espn, cfg, now)
+        log.info("%s: kandidatu %s", day, len(state["kandidati"]))
+        _send(notifier, format_plan(state["kandidati"], cfg))
+        save_state(state)
+    candidates: dict[str, dict[str, Any]] = state.get("kandidati", {})
+    active = {mid: c for mid, c in candidates.items()
+              if c["stav"] in ("ceka", "kurz")
+              and _kickoff(c) - timedelta(minutes=2) <= now <= _kickoff(c) + window}
+    if not active:
+        return False
+    for league in sorted({c["league"] for c in active.values()}):
+        try:
+            matches = {m["id"]: m for m in espn.scoreboard(league, _kickoff(
+                next(c for c in active.values() if c["league"] == league)).strftime("%Y%m%d"))}
+        except HlidacError as exc:
+            log.warning("%s", exc)
+            continue
+        for mid, cand in active.items():
+            if cand["league"] != league or mid not in matches:
+                continue
+            match = matches[mid]
+            verdict, info = check_trigger(match, cand, cfg.hlidac_goal_minute,
+                                          cfg.hlidac_goal_minute + 3)
+            if verdict == "trigger":
+                cand["stav"] = "kurz"
+                if record_case(espn, odds_api, cfg, state, mid, cand, info, match["minute"], notifier):
+                    cand["stav"] = "zaznamenano"
+            elif verdict == "pryc":
+                cand["stav"] = "nic"
+                log.info("%s - %s: %s", cand["home"], cand["away"], info)
+    for cand in active.values():
+        if cand["stav"] in ("ceka", "kurz") and now > _kickoff(cand) + window - timedelta(minutes=1):
+            cand["stav"] = "nic"
+    save_state(state)
+    return True
+
+
+def run(cfg: Config, *, max_minutes: float | None = None) -> int:
+    """
+    Hlidani. Bez max_minutes bezi do nekonecna (pocitac). S max_minutes (GitHub
+    Actions) odhlida dnesni den a skonci; kdyz se blizi limit a den jeste
+    neskoncil, vrati EXIT_CONTINUE -- workflow pak spusti pokracovani.
+    """
     lock = _single_instance()
     if lock is None:
         log.info("Hlidac uz bezi, druhou instanci nespoustim.")
@@ -671,59 +714,31 @@ def run(cfg: Config) -> int:
     espn = Espn(cfg)
     odds_api = OddsApi(cfg, state) if cfg.odds_api_key else None
     notifier = TelegramNotifier(cfg) if cfg.telegram_bot_token and cfg.telegram_chat_id else None
-    log.info("Hlidac spusten: %s lig, favorite do %.2f, gol do %s. min.",
-             len(cfg.hlidac_leagues), cfg.hlidac_max_odds, cfg.hlidac_goal_minute)
-    window = timedelta(minutes=cfg.hlidac_window_minutes)
+    log.info("Hlidac spusten: %s lig, favorite do %.2f, gol do %s. min.%s",
+             len(cfg.hlidac_leagues), cfg.hlidac_max_odds, cfg.hlidac_goal_minute,
+             f" Jednodenni beh, limit {max_minutes:.0f} min." if max_minutes else "")
+    started = time.monotonic()
     last_finish = 0.0
+    finish_results_safe(espn, cfg, state)
     while True:
         try:
             now = datetime.now(cfg.tz)
-            day = now.strftime("%Y-%m-%d")
-            if state.get("den") != day and now.hour >= cfg.hlidac_prep_hour:
-                state["den"], state["kandidati"] = day, plan_day(espn, cfg, now)
-                log.info("%s: kandidatu %s", day, len(state["kandidati"]))
-                _send(notifier, format_plan(state["kandidati"], cfg))
-                save_state(state)
-            candidates: dict[str, dict[str, Any]] = state.get("kandidati", {})
-            active = {mid: c for mid, c in candidates.items()
-                      if c["stav"] in ("ceka", "kurz")
-                      and _kickoff(c) - timedelta(minutes=2) <= now <= _kickoff(c) + window}
+            active = step(espn, odds_api, cfg, state, notifier, now)
+            if max_minutes is not None and not active:
+                planned = state.get("den") == now.strftime("%Y-%m-%d")
+                if planned and not day_remaining(state, cfg, now):
+                    finish_results_safe(espn, cfg, state)
+                    log.info("Dnes uz neni co hlidat, konec behu.")
+                    return 0
+                if (time.monotonic() - started) / 60 >= max_minutes:
+                    log.info("Blizi se casovy limit behu, predavam pokracovani.")
+                    save_state(state)
+                    return EXIT_CONTINUE
             if active:
-                for league in sorted({c["league"] for c in active.values()}):
-                    try:
-                        matches = {m["id"]: m for m in espn.scoreboard(league, _kickoff(
-                            next(c for c in active.values() if c["league"] == league)).strftime("%Y%m%d"))}
-                    except HlidacError as exc:
-                        log.warning("%s", exc)
-                        continue
-                    for mid, cand in active.items():
-                        if cand["league"] != league or mid not in matches:
-                            continue
-                        match = matches[mid]
-                        if match["state"] == "in" and match["minute"] >= 5 and not cand.get("snimek"):
-                            save_snapshot(espn, cand, mid, match["minute"], "prubeh")
-                            cand["snimek"] = True
-                        verdict, info = check_trigger(match, cand, cfg.hlidac_goal_minute,
-                                                      cfg.hlidac_goal_minute + 3)
-                        if verdict == "trigger":
-                            if cand["stav"] == "ceka":
-                                save_snapshot(espn, cand, mid, match["minute"], "gol")
-                            cand["stav"] = "kurz"
-                            if record_case(espn, odds_api, cfg, state, mid, cand, info,
-                                           matches[mid]["minute"], notifier):
-                                cand["stav"] = "zaznamenano"
-                        elif verdict == "pryc":
-                            cand["stav"] = "nic"
-                            log.info("%s - %s: %s", cand["home"], cand["away"], info)
-                for cand in active.values():
-                    if cand["stav"] in ("ceka", "kurz") and now > _kickoff(cand) + window - timedelta(minutes=1):
-                        cand["stav"] = "nic"
-                save_state(state)
                 time.sleep(cfg.hlidac_interval_seconds)
                 continue
             if time.time() - last_finish > 30 * 60 and state.get("k_dohrani"):
-                finish_results(espn, cfg, state)
-                save_state(state)
+                finish_results_safe(espn, cfg, state)
                 last_finish = time.time()
             time.sleep(60)
         except KeyboardInterrupt:
@@ -734,6 +749,14 @@ def run(cfg: Config) -> int:
             log.exception("Chyba: %s", exc)
             save_state(state)
             time.sleep(120)
+
+
+def finish_results_safe(espn: Espn, cfg: Config, state: dict[str, Any]) -> None:
+    try:
+        finish_results(espn, cfg, state)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Vysledky: %s", exc)
+    save_state(state)
 
 
 # --------------------------------------------------------------------------- #
@@ -811,7 +834,9 @@ def _setup_logging() -> None:
 def main(argv: list[str] | None = None) -> int:
     enable_utf8_stdout()
     parser = argparse.ArgumentParser(description="Hlidac zivych kurzu (favorit dostane gol do 15. minuty).")
-    parser.add_argument("command", choices=("run", "diag", "report", "plan"), nargs="?", default="run")
+    parser.add_argument("command", choices=("run", "den", "diag", "report", "plan"), nargs="?", default="run")
+    parser.add_argument("--max-minutes", type=float, default=330,
+                        help="pro 'den': po kolika minutach predat pokracovani (GitHub ma limit 6 h)")
     parser.add_argument("day", nargs="?", help="pro 'plan': den RRRR-MM-DD (vychozi dnes)")
     args = parser.parse_args(argv)
     _setup_logging()
@@ -829,6 +854,8 @@ def main(argv: list[str] | None = None) -> int:
                if args.day else datetime.now(cfg.tz))
         print(format_plan(plan_day(Espn(cfg), cfg, day), cfg))
         return 0
+    if args.command == "den":
+        return run(cfg, max_minutes=args.max_minutes)
     return diag(cfg) if args.command == "diag" else run(cfg)
 
 

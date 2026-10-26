@@ -18,8 +18,8 @@ tips.*.json
 state.json
 state.*.json
 
-# Hlidac zivych kurzu: stav je docasny; hlidac_pripady.csv (data) se commituje.
-hlidac_stav.json
+# Hlidac zivych kurzu: hlidac_stav.json a hlidac_pripady.csv se commituji
+# (GitHub Actions si je predavaji mezi behy).
 hlidac_espn_kurzy/
 
 # POZOR: tips.json (denik tipu) v repozitari BYT MUSI -- GitHub Actions

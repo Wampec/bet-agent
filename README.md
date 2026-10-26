@@ -618,22 +618,36 @@ diag` to odhalí). API-Football by bylo oficiální, ale bezplatný tarif má je
 **Hlídač nic nesází.** Když přijde VALUE, rozhoduje, co v tu chvíli nabízí
 Tipsport nebo Fortuna.
 
-### Spouštění na počítači
+### Kde běží: GitHub Actions (počítač může být vypnutý)
 
-Hlídač se spouští sám přes Plánovač úloh Windows (úloha **Hlidac zivych
-kurzu**): při přihlášení a každý den v 7:55, běží skrytě a druhou instanci
-nespustí. Výpis je v `hlidac.log`. Počítač musí být zapnutý a nesmí usnout
-(*Nastavení → Napájení → Režim spánku: Nikdy*).
+Hlídač běží v cloudu GitHubu (workflow **Hlidac**, `.github/workflows/hlidac.yml`).
+Repozitář je veřejný, takže minuty GitHub Actions jsou zdarma a bez limitu;
+klíče zůstávají šifrované v *GitHub secrets* a ve výpisech jsou skryté jako `***`.
+
+- **Spouštění:** cron-job.org každý den v 7:55 zavolá GitHub API
+  (`workflow_dispatch`) a běh začne do pár vteřin. Plánovač GitHubu (`schedule`)
+  se nepoužívá — zpožďoval běhy o hodiny.
+- **Jeden běh = jeden den:** ráno pošle seznam favoritů, během zápasů hlídá
+  a po posledním hlídaném zápase skončí. Když se ten den nehraje, skončí hned.
+- **Limit 6 hodin na běh:** delší den (sobota 13:00–22:00) si hlídač rozdělí —
+  před limitem skončí kódem 75 a workflow okamžitě spustí pokračování.
+- **Stav a zapsané případy** (`hlidac_stav.json`, `hlidac_pripady.csv`) si
+  běhy ukládají do repozitáře.
+
+Do 26. 10. 2026 běžel hlídač na počítači přes Plánovač úloh. Přes víkend ale
+počítač spal, a hlídač tak nehlídal. Úloha **Hlidac zivych kurzu** v Plánovači
+zůstala jen zakázaná — `python hlidac.py run` v okně funguje dál, kdyby bylo
+potřeba hlídat lokálně.
 
 | Příkaz | Co dělá |
 |---|---|
 | `python hlidac.py plan 2026-10-17` | favorité daného dne (zdarma, nic neposílá) |
 | `python hlidac.py diag` | kontrola soutěží, kreditů a Telegramu |
 | `python hlidac.py run` | hlídání ručně v okně (Ctrl+C ukončí) |
+| `python hlidac.py den` | jeden den hlídání a konec (tak běží na GitHubu) |
 | `python hlidac.py report` | vyhodnocení zapsaných případů |
 
-Vypnutí: *Plánovač úloh → Hlidac zivych kurzu → Zakázat*, nebo v PowerShellu
-`Disable-ScheduledTask "Hlidac zivych kurzu"`.
+Vypnutí: *Actions → Hlidac → … → Disable workflow* (a v cron-job.org pozastavit úlohu).
 
 Takových zápasů je v Evropě zhruba 2–4 za víkend, takže za měsíc nebo dva bude
 jasné, jestli kanceláře nad férovou hranici chodí.

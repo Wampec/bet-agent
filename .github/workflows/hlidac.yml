@@ -1,0 +1,79 @@
+# Hlidac zivych kurzu -- bezi v cloudu GitHubu, pocitac muze byt vypnuty.
+#
+# Spousteni: cron-job.org kazdy den v 7:55 zavola GitHub API (workflow_dispatch),
+# beh zacne behem par vterin. Planovac GitHubu (schedule) se zamerne NEPOUZIVA
+# -- v tomhle repozitari zpozdoval behy o hodiny.
+#
+# Jeden beh odhlida cely den: rano posle seznam favoritu, behem zapasu kontroluje
+# skore a pri spusteni pravidla posle zpravu. Kdyz uz dnes neni co hlidat,
+# skonci. GitHub dovoli jednomu behu nejvys 6 hodin -- kdyz je den delsi,
+# hlidac skonci kodem 75 a workflow si okamzite spusti pokracovani.
+#
+# Rucni spusteni: Actions -> Hlidac -> Run workflow.
+
+name: Hlidac
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write     # ulozit stav a zapsane pripady
+  actions: write      # spustit pokracovani
+
+# Nikdy dva behy najednou; pokracovani pocka, az predchozi beh dopise stav.
+concurrency:
+  group: hlidac
+  cancel-in-progress: false
+
+jobs:
+  hlidac:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+
+    steps:
+      - name: Stahnout kod a stav hlidace
+        uses: actions/checkout@v5
+
+      - name: Pripravit Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Nainstalovat knihovny
+        run: pip install requests python-dotenv
+
+      - name: Hlidat dnesni zapasy
+        id: hlidac
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PYTHONUNBUFFERED: "1"
+        run: |
+          set +e
+          python hlidac.py den --max-minutes 320
+          code=$?
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" != "0" ] && [ "$code" != "75" ]; then exit "$code"; fi
+          exit 0
+
+      - name: Ulozit stav a pripady do repozitare
+        if: always()
+        run: |
+          git add hlidac_stav.json hlidac_pripady.csv 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "Stav hlidace se nezmenil."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Hlidac $(TZ=Europe/Prague date +%Y-%m-%d)"
+          git pull --rebase
+          git push
+
+      - name: Spustit pokracovani (den jeste neskoncil)
+        if: steps.hlidac.outputs.code == '75'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run hlidac.yml --ref "${{ github.ref_name }}"

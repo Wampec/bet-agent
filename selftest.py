@@ -1923,6 +1923,57 @@ def test_hlidac() -> None:
     except hlidac.HlidacError:
         check("denni strop dotazu na zive kurzy", state["odds_pocet"] == 1)
 
+    # --- jednodenni beh (GitHub Actions) ---------------------------------------
+    from datetime import timezone as tz_
+    cfg_day = make_cfg()
+    kick = "2026-10-24T15:00Z"
+    noon = datetime(2026, 10, 24, 12, 0, tzinfo=tz_.utc)
+    st = {"den": "2026-10-24", "kandidati": {"1": {"stav": "ceka", "kickoff": kick},
+                                            "2": {"stav": "nic", "kickoff": kick}}}
+    check("pred zapasem den jeste neskoncil", hlidac.day_remaining(st, cfg_day, noon))
+    check("po konci okna posledniho zapasu je hotovo",
+          not hlidac.day_remaining(st, cfg_day, noon + timedelta(hours=4)))
+    st["kandidati"]["1"]["stav"] = "zaznamenano"
+    check("vyrizeny kandidat uz nic nedrzi", not hlidac.day_remaining(st, cfg_day, noon))
+    check("prazdny den = hotovo", not hlidac.day_remaining({"kandidati": {}}, cfg_day, noon))
+
+    class StepEspn:
+        def __init__(self, events):
+            self.events, self.calls = events, 0
+
+        def scoreboard(self, league, day):
+            self.calls += 1
+            return [hlidac.parse_event(e, league) for e in self.events]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        old_state = hlidac.STATE_FILE
+        hlidac.save_state.__defaults__ = (Path(tmp) / "stav.json",)
+        try:
+            ev = espn_event(state="in", clock=1260, goals=((2, 1300.0),))   # gol ve 22. min
+            ev["date"] = kick
+            cand_step = {"league": "eng.1", "kickoff": kick, "home": "Manchester City",
+                         "away": "Ipswich Town", "fav": "home", "pre": 1.3, "stav": "ceka",
+                         "pokusy_kurz": 0}
+            st2 = {"den": "2026-10-24", "kandidati": {"777": cand_step}}
+            fake = StepEspn([ev])
+            during = datetime(2026, 10, 24, 15, 22, tzinfo=tz_.utc)
+            check("krok behem okna kontroluje skore", hlidac.step(fake, None, cfg_day, st2, None, during)
+                  and fake.calls == 1)
+            check("gol ve 22. minute pravidlo nespusti (hranice 20.)", cand_step["stav"] == "nic")
+            check("mimo okno se ESPN nevola",
+                  not hlidac.step(fake, None, cfg_day, st2, None, noon) and fake.calls == 1)
+        finally:
+            hlidac.save_state.__defaults__ = (old_state,)
+
+    wf = Path(".github/workflows/hlidac.yml")
+    check("workflow hlidace existuje", wf.exists())
+    if wf.exists():
+        text = wf.read_text(encoding="utf-8")
+        check("workflow spousti jednodenni beh", "hlidac.py den" in text)
+        check("workflow si umi spustit pokracovani", "gh workflow run hlidac.yml" in text and "75" in text)
+        check("workflow uklada stav a pripady", "hlidac_stav.json" in text and "hlidac_pripady.csv" in text)
+        check("workflow nepouziva planovac GitHubu", "schedule:" not in text)
+
     check("vsechny vychozi ligy maji zivy kurz",
           all(lg in hlidac.ESPN_TO_ODDS for lg in make_cfg().hlidac_leagues))
 
