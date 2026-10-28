@@ -1,40 +1,28 @@
 {
- "den": "2026-10-26",
+ "den": "2026-10-28",
  "kandidati": {
-  "401876422": {
-   "league": "fra.1",
-   "kickoff": "2026-10-26T19:30Z",
-   "home": "Paris Saint-Germain",
-   "away": "Lyon",
-   "home_id": "160",
-   "away_id": "167",
-   "fav": "home",
-   "pre": 1.38,
-   "stav": "nic",
-   "pokusy_kurz": 0
-  },
-  "401885414": {
-   "league": "por.1",
-   "kickoff": "2026-10-26T18:45Z",
-   "home": "Santa Clara",
-   "away": "Benfica",
-   "home_id": "12215",
-   "away_id": "1929",
+  "401874773": {
+   "league": "ita.1",
+   "kickoff": "2026-10-28T17:30Z",
+   "home": "Venezia",
+   "away": "Internazionale",
+   "home_id": "17530",
+   "away_id": "110",
    "fav": "away",
-   "pre": 1.39,
-   "stav": "nic",
+   "pre": 1.34,
+   "stav": "ceka",
    "pokusy_kurz": 0
   },
-  "401888264": {
-   "league": "tur.1",
-   "kickoff": "2026-10-26T16:00Z",
-   "home": "Besiktas",
-   "away": "Istanbul Basaksehir",
-   "home_id": "1895",
-   "away_id": "7914",
+  "401878355": {
+   "league": "sco.1",
+   "kickoff": "2026-10-28T19:45Z",
+   "home": "Celtic",
+   "away": "Dundee United",
+   "home_id": "256",
+   "away_id": "264",
    "fav": "home",
-   "pre": 1.39,
-   "stav": "nic",
+   "pre": 1.25,
+   "stav": "ceka",
    "pokusy_kurz": 0
   }
  },
