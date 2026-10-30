@@ -1,6 +1,31 @@
 {
- "den": "2026-10-29",
- "kandidati": {},
+ "den": "2026-10-30",
+ "kandidati": {
+  "401876421": {
+   "league": "fra.1",
+   "kickoff": "2026-10-30T18:00Z",
+   "home": "Le Havre AC",
+   "away": "Paris Saint-Germain",
+   "home_id": "3236",
+   "away_id": "160",
+   "fav": "away",
+   "pre": 1.29,
+   "stav": "ceka",
+   "pokusy_kurz": 0
+  },
+  "401885408": {
+   "league": "por.1",
+   "kickoff": "2026-10-30T20:15Z",
+   "home": "Casa Pia",
+   "away": "Sporting CP",
+   "home_id": "21581",
+   "away_id": "2250",
+   "fav": "away",
+   "pre": 1.29,
+   "stav": "ceka",
+   "pokusy_kurz": 0
+  }
+ },
  "odds_den": "2026-10-15",
  "odds_pocet": 4,
  "odds_zbyva": "122",
