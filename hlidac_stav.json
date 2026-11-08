@@ -10,7 +10,7 @@
    "away_id": "148",
    "fav": "away",
    "pre": 1.39,
-   "stav": "ceka",
+   "stav": "nic",
    "pokusy_kurz": 0
   },
   "401885401": {
@@ -46,7 +46,7 @@
    "away_id": "260",
    "fav": "home",
    "pre": 1.15,
-   "stav": "ceka",
+   "stav": "nic",
    "pokusy_kurz": 0
   },
   "401896733": {
@@ -58,7 +58,7 @@
    "away_id": "5276",
    "fav": "home",
    "pre": 1.22,
-   "stav": "ceka",
+   "stav": "nic",
    "pokusy_kurz": 0
   },
   "401896811": {
@@ -70,8 +70,8 @@
    "away_id": "443",
    "fav": "away",
    "pre": 1.37,
-   "stav": "ceka",
-   "pokusy_kurz": 0
+   "stav": "zaznamenano",
+   "pokusy_kurz": 2
   },
   "401843482": {
    "league": "nor.1",
@@ -82,12 +82,18 @@
    "away_id": "22165",
    "fav": "home",
    "pre": 1.22,
-   "stav": "ceka",
+   "stav": "nic",
    "pokusy_kurz": 0
   }
  },
- "odds_den": "2026-10-15",
- "odds_pocet": 4,
- "odds_zbyva": "122",
- "k_dohrani": {}
+ "odds_den": "2026-11-08",
+ "odds_pocet": 1,
+ "odds_zbyva": "499",
+ "k_dohrani": {
+  "401896811": {
+   "fav": "away",
+   "league": "gre.1",
+   "kickoff": "2026-11-08T15:30Z"
+  }
+ }
 }
