@@ -22,7 +22,7 @@
    "away_id": "1929",
    "fav": "away",
    "pre": 1.24,
-   "stav": "ceka",
+   "stav": "nic",
    "pokusy_kurz": 0
   },
   "401888251": {
@@ -34,7 +34,7 @@
    "away_id": "996",
    "fav": "home",
    "pre": 1.2,
-   "stav": "ceka",
+   "stav": "nic",
    "pokusy_kurz": 0
   },
   "401878343": {
@@ -89,11 +89,5 @@
  "odds_den": "2026-11-08",
  "odds_pocet": 1,
  "odds_zbyva": "499",
- "k_dohrani": {
-  "401896811": {
-   "fav": "away",
-   "league": "gre.1",
-   "kickoff": "2026-11-08T15:30Z"
-  }
- }
+ "k_dohrani": {}
 }
