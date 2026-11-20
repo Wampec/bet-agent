@@ -10,12 +10,18 @@
    "away_id": "122",
    "fav": "home",
    "pre": 1.06,
-   "stav": "ceka",
+   "stav": "zaznamenano",
    "pokusy_kurz": 0
   }
  },
  "odds_den": "2026-11-08",
  "odds_pocet": 1,
  "odds_zbyva": "499",
- "k_dohrani": {}
+ "k_dohrani": {
+  "401884736": {
+   "fav": "home",
+   "league": "ger.1",
+   "kickoff": "2026-11-20T19:30Z"
+  }
+ }
 }
