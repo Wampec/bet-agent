@@ -10,7 +10,7 @@
    "away_id": "370",
    "fav": "home",
    "pre": 1.38,
-   "stav": "ceka",
+   "stav": "zaznamenano",
    "pokusy_kurz": 0
   },
   "401882798": {
@@ -34,7 +34,7 @@
    "away_id": "3307",
    "fav": "home",
    "pre": 1.26,
-   "stav": "ceka",
+   "stav": "nic",
    "pokusy_kurz": 0
   },
   "401875056": {
@@ -46,7 +46,7 @@
    "away_id": "2925",
    "fav": "home",
    "pre": 1.28,
-   "stav": "ceka",
+   "stav": "nic",
    "pokusy_kurz": 0
   },
   "401874967": {
@@ -58,7 +58,7 @@
    "away_id": "104",
    "fav": "away",
    "pre": 1.24,
-   "stav": "ceka",
+   "stav": "nic",
    "pokusy_kurz": 0
   },
   "401875543": {
@@ -70,7 +70,7 @@
    "away_id": "2566",
    "fav": "home",
    "pre": 1.18,
-   "stav": "ceka",
+   "stav": "nic",
    "pokusy_kurz": 0
   },
   "401878935": {
@@ -94,7 +94,7 @@
    "away_id": "250",
    "fav": "home",
    "pre": 1.18,
-   "stav": "ceka",
+   "stav": "nic",
    "pokusy_kurz": 0
   },
   "401881749": {
@@ -106,7 +106,7 @@
    "away_id": "6907",
    "fav": "home",
    "pre": 1.31,
-   "stav": "ceka",
+   "stav": "nic",
    "pokusy_kurz": 0
   },
   "401896810": {
@@ -118,7 +118,7 @@
    "away_id": "887",
    "fav": "away",
    "pre": 1.36,
-   "stav": "ceka",
+   "stav": "nic",
    "pokusy_kurz": 0
   },
   "401880153": {
@@ -130,7 +130,7 @@
    "away_id": "374",
    "fav": "home",
    "pre": 1.37,
-   "stav": "ceka",
+   "stav": "nic",
    "pokusy_kurz": 0
   },
   "401880157": {
@@ -142,7 +142,7 @@
    "away_id": "333",
    "fav": "home",
    "pre": 1.39,
-   "stav": "ceka",
+   "stav": "nic",
    "pokusy_kurz": 0
   },
   "401880150": {
@@ -154,7 +154,7 @@
    "away_id": "394",
    "fav": "home",
    "pre": 1.24,
-   "stav": "ceka",
+   "stav": "zaznamenano",
    "pokusy_kurz": 0
   },
   "401880149": {
@@ -166,7 +166,7 @@
    "away_id": "372",
    "fav": "home",
    "pre": 1.32,
-   "stav": "ceka",
+   "stav": "nic",
    "pokusy_kurz": 0
   }
  },
