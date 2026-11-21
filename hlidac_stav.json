@@ -22,8 +22,8 @@
    "away_id": "85",
    "fav": "home",
    "pre": 1.17,
-   "stav": "ceka",
-   "pokusy_kurz": 0
+   "stav": "zaznamenano",
+   "pokusy_kurz": 2
   },
   "401884735": {
    "league": "ger.1",
@@ -82,7 +82,7 @@
    "away_id": "570",
    "fav": "away",
    "pre": 1.39,
-   "stav": "ceka",
+   "stav": "nic",
    "pokusy_kurz": 0
   },
   "401878338": {
@@ -170,8 +170,14 @@
    "pokusy_kurz": 0
   }
  },
- "odds_den": "2026-11-08",
+ "odds_den": "2026-11-21",
  "odds_pocet": 1,
- "odds_zbyva": "499",
- "k_dohrani": {}
+ "odds_zbyva": "498",
+ "k_dohrani": {
+  "401882798": {
+   "fav": "home",
+   "league": "esp.1",
+   "kickoff": "2026-11-21T20:00Z"
+  }
+ }
 }
