@@ -11,5 +11,5 @@ datum;liga;domaci;hoste;zapas_id;favorit;kurz_pred;minuta_golu;minuta_zaznamu;li
 2026-11-21;esp.1;Real Madrid;Celta Vigo;401882798;Real Madrid;1.17;6;10;1.43;1.48;4.7;6.0;1.1;15;The Odds API (dvojtip jen odhad);1.36;1.13;1;0;2:1;1;1
 2026-11-22;esp.1;Barcelona;Villarreal;401882804;Barcelona;1.18;5;8;1.41;2.06;5.35;5.35;1.12;20;The Odds API (dvojtip jen odhad);1.36;1.13;0;0;3:2;1;1
 2026-11-26;uefa.europa;Union St.-Gilloise;Lech Poznan;401915508;Union St.-Gilloise;1.36;15;19;1.93;3.25;3.7;3.37;1.27;15;The Odds API (dvojtip jen odhad);1.71;1.26;1;0;2:2;0;1
-2026-11-26;uefa.europa;Juventus;Omonia Nicosia;401915502;Juventus;1.17;15;20;1.62;1.7;3.8;4.88;1.14;14;The Odds API (dvojtip jen odhad);1.36;1.13;1;0;;;
-2026-11-26;uefa.europa.conf;Inter D'Escaldes;F.C. København;401915738;F.C. København;1.26;19;23;2.12;2.2;3.2;3.45;1.28;11;The Odds API (dvojtip jen odhad);1.71;1.26;1;0;;;
+2026-11-26;uefa.europa;Juventus;Omonia Nicosia;401915502;Juventus;1.17;15;20;1.62;1.7;3.8;4.88;1.14;14;The Odds API (dvojtip jen odhad);1.36;1.13;1;0;4:1;1;1
+2026-11-26;uefa.europa.conf;Inter D'Escaldes;F.C. København;401915738;F.C. København;1.26;19;23;2.12;2.2;3.2;3.45;1.28;11;The Odds API (dvojtip jen odhad);1.71;1.26;1;0;2:0;0;0

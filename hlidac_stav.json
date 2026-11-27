@@ -1,176 +1,21 @@
 {
- "den": "2026-11-26",
+ "den": "2026-11-27",
  "kandidati": {
-  "401915506": {
-   "league": "uefa.europa",
-   "kickoff": "2026-11-26T17:45Z",
-   "home": "Besiktas",
-   "away": "Hapoel Be'er",
-   "home_id": "1895",
-   "away_id": "13083",
-   "fav": "home",
-   "pre": 1.26,
-   "stav": "nic",
-   "pokusy_kurz": 0
-  },
-  "401915507": {
-   "league": "uefa.europa",
-   "kickoff": "2026-11-26T17:45Z",
-   "home": "Marseille",
-   "away": "Levski Sofia",
-   "home_id": "176",
-   "away_id": "490",
-   "fav": "home",
-   "pre": 1.35,
-   "stav": "nic",
-   "pokusy_kurz": 0
-  },
-  "401915520": {
-   "league": "uefa.europa",
-   "kickoff": "2026-11-26T17:45Z",
-   "home": "RB Salzburg",
-   "away": "Ararat-Armenia",
-   "home_id": "2790",
-   "away_id": "20024",
-   "fav": "home",
-   "pre": 1.15,
-   "stav": "nic",
-   "pokusy_kurz": 0
-  },
-  "401915508": {
-   "league": "uefa.europa",
-   "kickoff": "2026-11-26T17:45Z",
-   "home": "Union St.-Gilloise",
-   "away": "Lech Poznan",
-   "home_id": "5807",
-   "away_id": "2990",
-   "fav": "home",
-   "pre": 1.36,
-   "stav": "zaznamenano",
-   "pokusy_kurz": 2
-  },
-  "401915516": {
-   "league": "uefa.europa",
-   "kickoff": "2026-11-26T20:00Z",
-   "home": "Ferencvaros",
-   "away": "NK Celje",
-   "home_id": "622",
-   "away_id": "3362",
+  "401875536": {
+   "league": "ned.1",
+   "kickoff": "2026-11-27T19:00Z",
+   "home": "FC Groningen",
+   "away": "Willem II",
+   "home_id": "145",
+   "away_id": "156",
    "fav": "home",
    "pre": 1.37,
-   "stav": "nic",
+   "stav": "ceka",
    "pokusy_kurz": 0
-  },
-  "401915502": {
-   "league": "uefa.europa",
-   "kickoff": "2026-11-26T20:00Z",
-   "home": "Juventus",
-   "away": "Omonia Nicosia",
-   "home_id": "111",
-   "away_id": "617",
-   "fav": "home",
-   "pre": 1.17,
-   "stav": "zaznamenano",
-   "pokusy_kurz": 2
-  },
-  "401915501": {
-   "league": "uefa.europa",
-   "kickoff": "2026-11-26T20:00Z",
-   "home": "Lyon",
-   "away": "Lillestrom",
-   "home_id": "167",
-   "away_id": "987",
-   "fav": "home",
-   "pre": 1.21,
-   "stav": "nic",
-   "pokusy_kurz": 0
-  },
-  "401915513": {
-   "league": "uefa.europa",
-   "kickoff": "2026-11-26T20:00Z",
-   "home": "Sunderland",
-   "away": "Jagiellonia Bialystok",
-   "home_id": "366",
-   "away_id": "11505",
-   "fav": "home",
-   "pre": 1.25,
-   "stav": "nic",
-   "pokusy_kurz": 0
-  },
-  "401915515": {
-   "league": "uefa.europa",
-   "kickoff": "2026-11-26T20:00Z",
-   "home": "TSG Hoffenheim",
-   "away": "SK Sturm Graz",
-   "home_id": "7911",
-   "away_id": "3746",
-   "fav": "home",
-   "pre": 1.35,
-   "stav": "nic",
-   "pokusy_kurz": 0
-  },
-  "401915815": {
-   "league": "uefa.europa.conf",
-   "kickoff": "2026-11-26T17:45Z",
-   "home": "Ajax Amsterdam",
-   "away": "FC Thun",
-   "home_id": "139",
-   "away_id": "3024",
-   "fav": "home",
-   "pre": 1.17,
-   "stav": "nic",
-   "pokusy_kurz": 0
-  },
-  "401915814": {
-   "league": "uefa.europa.conf",
-   "kickoff": "2026-11-26T17:45Z",
-   "home": "Brighton & Hove Albion",
-   "away": "CSU Craiova",
-   "home_id": "331",
-   "away_id": "8089",
-   "fav": "home",
-   "pre": 1.11,
-   "stav": "nic",
-   "pokusy_kurz": 0
-  },
-  "401915802": {
-   "league": "uefa.europa.conf",
-   "kickoff": "2026-11-26T20:00Z",
-   "home": "Braga",
-   "away": "KuPS Kuopio",
-   "home_id": "2994",
-   "away_id": "8169",
-   "fav": "home",
-   "pre": 1.14,
-   "stav": "nic",
-   "pokusy_kurz": 0
-  },
-  "401915738": {
-   "league": "uefa.europa.conf",
-   "kickoff": "2026-11-26T20:00Z",
-   "home": "Inter D'Escaldes",
-   "away": "F.C. København",
-   "home_id": "20703",
-   "away_id": "909",
-   "fav": "away",
-   "pre": 1.26,
-   "stav": "zaznamenano",
-   "pokusy_kurz": 2
   }
  },
  "odds_den": "2026-11-26",
  "odds_pocet": 3,
  "odds_zbyva": "494",
- "k_dohrani": {
-  "401915502": {
-   "fav": "home",
-   "league": "uefa.europa",
-   "kickoff": "2026-11-26T20:00Z"
-  },
-  "401915738": {
-   "fav": "away",
-   "league": "uefa.europa.conf",
-   "kickoff": "2026-11-26T20:00Z"
-  }
- }
+ "k_dohrani": {}
 }
