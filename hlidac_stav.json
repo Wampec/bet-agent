@@ -1,16 +1,88 @@
 {
- "den": "2026-11-27",
+ "den": "2026-11-28",
  "kandidati": {
-  "401875536": {
-   "league": "ned.1",
-   "kickoff": "2026-11-27T19:00Z",
-   "home": "FC Groningen",
-   "away": "Willem II",
-   "home_id": "145",
-   "away_id": "156",
+  "401882789": {
+   "league": "esp.1",
+   "kickoff": "2026-11-28T20:00Z",
+   "home": "Real Madrid",
+   "away": "Alavés",
+   "home_id": "86",
+   "away_id": "96",
    "fav": "home",
-   "pre": 1.37,
-   "stav": "nic",
+   "pre": 1.14,
+   "stav": "ceka",
+   "pokusy_kurz": 0
+  },
+  "401874977": {
+   "league": "ita.1",
+   "kickoff": "2026-11-28T19:45Z",
+   "home": "Internazionale",
+   "away": "Genoa",
+   "home_id": "110",
+   "away_id": "3263",
+   "fav": "home",
+   "pre": 1.29,
+   "stav": "ceka",
+   "pokusy_kurz": 0
+  },
+  "401876387": {
+   "league": "fra.1",
+   "kickoff": "2026-11-28T19:45Z",
+   "home": "Paris Saint-Germain",
+   "away": "Lorient",
+   "home_id": "160",
+   "away_id": "273",
+   "fav": "home",
+   "pre": 1.19,
+   "stav": "ceka",
+   "pokusy_kurz": 0
+  },
+  "401875531": {
+   "league": "ned.1",
+   "kickoff": "2026-11-28T17:45Z",
+   "home": "PSV Eindhoven",
+   "away": "Go Ahead Eagles",
+   "home_id": "148",
+   "away_id": "3706",
+   "fav": "home",
+   "pre": 1.21,
+   "stav": "ceka",
+   "pokusy_kurz": 0
+  },
+  "401878328": {
+   "league": "sco.1",
+   "kickoff": "2026-11-28T15:00Z",
+   "home": "Rangers",
+   "away": "Falkirk",
+   "home_id": "257",
+   "away_id": "254",
+   "fav": "home",
+   "pre": 1.24,
+   "stav": "ceka",
+   "pokusy_kurz": 0
+  },
+  "401881738": {
+   "league": "aut.1",
+   "kickoff": "2026-11-28T18:30Z",
+   "home": "Austria Lustenau",
+   "away": "Rapid Vienna",
+   "home_id": "21540",
+   "away_id": "519",
+   "fav": "away",
+   "pre": 1.31,
+   "stav": "ceka",
+   "pokusy_kurz": 0
+  },
+  "401843492": {
+   "league": "nor.1",
+   "kickoff": "2026-11-28T15:00Z",
+   "home": "Bodo/Glimt",
+   "away": "KFUM Oslo",
+   "home_id": "2980",
+   "away_id": "22165",
+   "fav": "home",
+   "pre": 1.07,
+   "stav": "ceka",
    "pokusy_kurz": 0
   }
  },
